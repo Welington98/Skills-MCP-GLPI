@@ -1,0 +1,34 @@
+# Skills-MCP-GLPI — sobe o servidor MCP como servico Docker.
+#
+#   docker compose up -d --build
+#
+# A configuracao vem do .env local (GLPI_BASE_URL, GLPI_APP_TOKEN, ...),
+# passada ao container via env_file. LOG_FILE aponta para /tmp dentro do
+# container (ephemero); o console tambem vai para o stdout do container.
+#
+# Alternativa multi-instancia: monte um glpi-config.json por cliente e aponte
+# GLPI_MCP_CONFIG para ele (veja docs/QUICK-START.md).
+
+services:
+  mcp-glpi:
+    build: .
+    image: skills-mcp-glpi:latest
+    container_name: mcp-glpi
+    ports:
+      - "${MCP_PORT:-8824}:8824"
+    env_file:
+      - .env
+    environment:
+      LOG_FILE: /tmp/mcp-glpi.log
+      # Opcional: config JSON por instancia (multi-tenant), montada como volume.
+      # GLPI_MCP_CONFIG: /app/glpi-config.json
+    # volumes:
+    #   - ./glpi-config.json:/app/glpi-config.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8824/health', timeout=3); sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

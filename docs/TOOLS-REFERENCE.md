@@ -27,6 +27,8 @@
 | 16 | `glpi_search_itil_records` | ITIL | Leitura |
 | 17 | `glpi_manage_itil_records` | ITIL | Escrita |
 | 18 | `glpi_search_records_by_criteria` | Consulta livre | Leitura |
+| 19 | `glpi_search_forms` | Forms / Catálogo | Leitura |
+| 20 | `glpi_manage_forms` | Forms / Catálogo | Escrita |
 
 ### Como escolher a tool
 
@@ -36,6 +38,7 @@
 | Problemas, mudanças (RFC), projetos, contratos, fornecedores | `glpi_search_itil_records`, `glpi_manage_itil_records` |
 | Equipamentos, inventário, reservas | `glpi_search_asset_inventory`, `glpi_manage_asset_operations` |
 | Usuários, grupos, entidades, localizações | `glpi_search_admin_resources`, `glpi_manage_admin_resources` |
+| Formulários nativos e catálogo de serviços | `glpi_search_forms`, `glpi_manage_forms` |
 | Algo que não cabe nos filtros prontos, contagem barata ou descoberta de campos | `glpi_search_records_by_criteria` |
 
 > **Convenção:** `glpi_search_*` é sempre somente leitura; `glpi_manage_*` executa escrita.
@@ -899,9 +902,132 @@ chave-valor para colunas não cobertas acima), `purge` (padrão `false` = lixeir
 
 ---
 
-## 8. CONSULTA LIVRE
+## 8. FORMS / CATÁLOGO DE SERVIÇOS
 
-### 8.1 `glpi_search_records_by_criteria`
+Formulários **nativos do GLPI 11** (módulo Forms, que substitui o plugin
+Formcreator) e as categorias do **catálogo de serviços**. O catálogo é
+construído a partir dos formulários: cada formulário vira um serviço no
+catálogo, e as categorias organizam esses serviços em árvore.
+
+> **Requisito:** GLPI 11.x. No GLPI 10 os formulários são do plugin Formcreator
+> (`PluginFormcreator*`), que está em fim de vida e **não** é coberto por estas
+> tools. A API é acessada com o itemtype `Glpi\Form\Form` percent-encoded
+> (`%5C`) — se o proxy entre o MCP e o GLPI não decodificar o encoding, a
+> chamada falha com mensagem clara orientando a correção.
+
+### 8.1 `glpi_search_forms`
+
+Busca e listagem de formulários ou de categorias do catálogo. **Somente leitura.**
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|-----------|------|:-----------:|-----------|
+| `scope` | string | Não | `forms` (padrão) ou `categories` |
+| `query` | string | Não | Busca textual no título do formulário / nome da categoria (mín. 2 caracteres) |
+| `is_active` | boolean | Não | Filtra formulários ativos/inativos (só `scope=forms`) |
+| `category_id` | integer | Não | ID da categoria do catálogo (só `scope=forms`) |
+| `entity_id` / `entity_name` | — | Não | **Opcional** — só para sub-entidade (busca recursiva) |
+| `sort_by` | string | Não | `name`, `id`, `date_mod`, `date_creation`, `category`, `is_active` (forms); `name`, `id` (categories) |
+| `order` | string | Não | `asc` ou `desc` |
+| `limit` | integer | Não | Resultados (padrão: 10, máx: 50) |
+| `offset` | integer | Não | Offset paginação |
+
+**Exemplos:**
+```
+"Quais formulários existem no catálogo?"
+→ Params: { "scope": "forms" }
+
+"Listar categorias de serviços"
+→ Params: { "scope": "categories" }
+
+"Formulários da categoria TI"
+→ Params: { "scope": "forms", "category_id": 2 }
+```
+
+### 8.2 `glpi_manage_forms`
+
+Operações sobre **um** formulário, secão, pergunta, comentário ou categoria.
+**Escrita.** Exclusão é destrutiva e passa pelo safety guard.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|-----------|------|:-----------:|-----------|
+| `action` | string | **Sim** | Ver tabela de ações abaixo |
+| `form_id` | integer | Conforme ação | ID do formulário |
+| `section_id` | integer | Conforme ação | ID da seção |
+| `question_id` | integer | Conforme ação | ID da pergunta |
+| `comment_id` | integer | Conforme ação | ID do comentário |
+| `category_id` | integer | Conforme ação | ID da categoria |
+| `name` | string | create | Título do formulário/seção/pergunta/categoria |
+| `description` | string | Não | Descrição (texto rico) |
+| `header` | string | Não | Cabeçalho do formulário |
+| `is_active` / `is_pinned` / `is_draft` | boolean | Não | Flags do formulário |
+| `rank` | integer | Não | Ordem da seção |
+| `vertical_rank` / `horizontal_rank` | integer | Não | Posição do bloco na seção |
+| `parent_id` | integer | Não | Categoria pai |
+| `type` | string | create_question | Tipo da pergunta (ver abaixo) |
+| `default_value` | string | Não | Valor padrão da pergunta |
+| `options` | array | Não | Rótulos das opções (radio/checkbox/dropdown) |
+| `extra_data` | object | Não | Configuração extra da pergunta |
+| `is_multiple_dropdown` | boolean | Não | Multi-escolha em dropdown |
+| `conditions` / `validation_conditions` | array | Não | Condições de visibilidade/validação (avançado) |
+| `init_sections` / `init_destinations` / `init_access_policies` | boolean | Não | Desativa o auto-bootstrap no create do formulário |
+| `purge` | boolean | Não | `true` (padrão) exclui definitivamente |
+| `confirmation_token` / `reason` | — | delete | Confirmam exclusão quando o safety guard está ativo |
+
+**Ações (`action`):**
+
+| Ação | Requer | Efeito |
+|------|--------|--------|
+| `get` | `form_id` | Detalhe do formulário com seções/perguntas/comentários |
+| `create` | `name` | Cria formulário (auto-cria 1ª seção, destino e acesso) |
+| `update` | `form_id` | Altera metadados do formulário |
+| `delete` | `form_id` | Exclui formulário (cascata) |
+| `list_sections` | `form_id` | Lista as seções do formulário |
+| `create_section` | `form_id`, `name` | Adiciona seção |
+| `update_section` | `section_id` | Altera seção |
+| `delete_section` | `section_id` | Exclui seção (cascata em perguntas/comentários) |
+| `create_question` | `section_id`, `name`, `type` | Adiciona pergunta |
+| `update_question` | `question_id` | Altera pergunta |
+| `delete_question` | `question_id` | Exclui pergunta |
+| `create_comment` / `update_comment` / `delete_comment` | `section_id` / `comment_id` | Comentário informativo na seção |
+| `create_category` | `name` | Cria categoria do catálogo |
+| `update_category` | `category_id` | Altera categoria |
+| `delete_category` | `category_id` | Exclui categoria |
+
+**Tipos de pergunta (`type`)**: `text`, `email`, `number`, `long_answer`,
+`date`, `radio`, `checkbox`, `dropdown`, `item` (objeto GLPI),
+`item_dropdown`, `assignee`, `requester`, `observer`, `urgency`,
+`request_type`, `file`, `user_device`. Aceita também o FQCN do QuestionType
+(`Glpi\Form\QuestionType\QuestionTypeShortText`).
+
+**Exemplos:**
+```
+"Crie o formulário 'Solicitar acesso VPN' na categoria TI"
+→ Params: { "action": "create", "name": "Solicitar acesso VPN", "category_id": 2,
+            "description": "Solicitação de acesso à VPN corporativa" }
+
+"Adicione uma seção 'Dados do solicitante'"
+→ Params: { "action": "create_section", "form_id": 12, "name": "Dados do solicitante" }
+
+"Adicione uma pergunta de e-mail obrigatória"
+→ Params: { "action": "create_question", "section_id": 3, "name": "E-mail",
+            "type": "email" }
+
+"Crie a categoria TI"
+→ Params: { "action": "create_category", "name": "TI" }
+```
+
+> **Limitações conhecidas:** as respostas enviadas pelos usuários
+> (`Glpi\Form\AnswersSet`) **não** são gerenciáveis via REST — estas tools
+> cuidam da *definição* do formulário (o catálogo), não do preenchimento.
+> Obrigatoriedade e condicionais de pergunta são controlados pelos campos
+> avançados `conditions` / `validation_conditions` no formato `ConditionData`
+> do GLPI.
+
+---
+
+## 9. CONSULTA LIVRE
+
+### 9.1 `glpi_search_records_by_criteria`
 
 Consulta por critérios livres em **qualquer itemtype** do GLPI, quando a pergunta não
 cabe nos filtros prontos das outras tools.

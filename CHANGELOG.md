@@ -8,6 +8,60 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Docker as a service.** `Dockerfile` (Python 3.13-slim, usuário não-root,
+  healthcheck em `/health`) e `docker-compose.yml` (`restart: unless-stopped`,
+  `.env` repassado ao container, `LOG_FILE` em `/tmp`) para rodar o servidor
+  como serviço. `docker compose up -d --build`. Config nunca entra na imagem
+  (`.dockerignore` exclui `.env`, logs, testes, docs e a base de conhecimento
+  opcional). Multi-instância por cliente via `GLPI_MCP_CONFIG` montado como
+  volume.
+- **Native GLPI 11 Forms / service catalog tools.** The Forms module (the successor
+  to the Formcreator plugin, which is EOL) is now manageable through two consolidated
+  tools that build the service catalog without the UI:
+  - `glpi_search_forms` — list/text-search forms (`scope=forms`) and catalog
+    categories (`scope=categories`), with filters for name, category, entity and
+    active status. Read-only.
+  - `glpi_manage_forms` — CRUD of a form (name, description, header, category,
+    active/pinned/draft flags), its sections, questions, comments and catalog
+    categories. Question types by friendly name (`text`, `email`, `radio`,
+    `dropdown`, `item`, `assignee`, …) or QuestionType FQCN; radio/checkbox/dropdown
+    options are auto-uuid'd into `extra_data.options`.
+  - Reaches the legacy V1 API through percent-encoded namespaced itemtypes
+    (`Glpi%5CForm%5CForm`, `Glpi%5CForm%5CSection`, `Glpi%5CForm%5CQuestion`,
+    `Glpi%5CForm%5CComment`, `Glpi%5CForm%5CCategory`). When the web server does not
+    decode the `%5C`, the error is translated into a clear message pointing at the
+    proxy/webserver instead of surfacing as "form not found".
+  - A `POST` to `Glpi\Form\Form` auto-bootstraps a first section, a ticket destination
+    and an access policy; each can be disabled via `_init_*` flags.
+  - New files: `src/services/form_service.py`, `src/tools/consolidated_forms.py`,
+    `tests/test_forms.py`.
+- **Write-policy gates for forms.** `form.create/update/delete`,
+  `form.structure_create/update`, `form.section/comment/question.delete` and
+  `form.category_create/update/delete` are individually enable-able via
+  `GLPI_ALLOW_<OPERATION>`; every delete defaults to **disabled** and passes the
+  shared safety guard (`delete_form*`).
+
+### Fixed
+
+- **Form create defaulted `is_active` to off.** `_coerce_bool(None)` returned
+  `False`, so a form created without `is_active` was born inactive and an update
+  that omitted `is_pinned`/`is_draft` wrote `0` over the stored value. The flags
+  are now coerced per branch, where each action knows its default (`is_active`
+  defaults to `true` on create, unset flags are skipped on update).
+  Found by the live smoke test against the H2O Innovation GLPI.
+- **`is_multiple_dropdown` leaked into every question with options.** The same
+  blanket coercion added `"is_multiple_dropdown": 0` to radio/checkbox
+  `extra_data`. It is now only sent for dropdown questions and only when the
+  caller supplies it.
+- **Delete mutation message.** `glpi_manage_forms` reported "salvo com sucesso"
+  after `delete_section`/`delete_question`/`delete_category` because the
+  message check matched only the literal action `delete`; any `*_delete` action
+  now renders the purge/bin message.
+
+---
+
 Knowledge-base release: the ticket KB stopped answering with the *form* and started
 answering with the *fix*.
 

@@ -14,6 +14,7 @@ from src.tools.consolidated_itil import search_itil_records, manage_itil_records
 from src.tools.consolidated_search import search_records
 from src.tools.consolidated_assets import search_assets, manage_assets
 from src.tools.consolidated_admin import search_admin, manage_admin
+from src.tools.consolidated_forms import search_forms, manage_forms
 from src.tools.consolidated_webhooks import search_webhooks, manage_webhooks
 from src.tools.bridge_tools import bridge_tools
 from src.services.kb_search.handler import search_knowledge_unified as kb_search_unified
@@ -580,6 +581,86 @@ class MCPHandler:
                 },
                 "handler": manage_itil_records,
                 "category": "itil",
+                "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True},
+            },
+            # === FORMS / CATALOGO DE SERVICOS (2 tools) ===
+            {
+                "name": "glpi_search_forms",  # 17 chars
+                "description": (
+                    "Formularios e categorias do catalogo de servicos no GLPI — busca unificada dos formularios nativos do "
+                    "GLPI 11 (modulo Forms), com filtro por nome, categoria, entidade e status ativo. Use scope para selecionar: "
+                    "forms (formularios) ou categories (categorias do catalogo). Use para 'quais formularios existem', "
+                    "'listar categorias de servicos', 'criar catalogo de servicos'. IMPORTANTE: formularios nativos do GLPI 11, "
+                    "nao o plugin Formcreator. Retorna tabela Markdown paginada. Somente leitura."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "scope": {"type": "string", "description": "Escopo da busca no GLPI. Valores: forms (formularios, padrao), categories (categorias do catalogo de servicos).", "enum": ["forms", "categories"], "default": "forms"},
+                        "query": {"type": "string", "description": "Texto para busca no titulo do formulario ou nome da categoria (minimo 2 caracteres)."},
+                        "is_active": {"type": "boolean", "description": "Filtra formularios ativos (true) ou inativos (false). Somente scope=forms."},
+                        "category_id": {"type": "integer", "description": "ID da categoria do catalogo para filtrar formularios. Somente scope=forms."},
+                        "entity_id": {"type": "integer", "description": "OPCIONAL — Token ja fixa tenant. So preencha para filtrar UMA sub-entidade especifica (busca recursiva)."},
+                        "entity_name": {"type": "string", "description": "OPCIONAL — Token ja fixa tenant. Nome de UMA sub-entidade, resolvido automaticamente."},
+                        "sort_by": {"type": "string", "description": "Campo de ordenacao. forms: name, id, date_mod, date_creation, category, is_active. categories: name, id. Campo desconhecido cai no padrao.", "enum": ["name", "id", "date_mod", "date_creation", "category", "is_active"]},
+                        "order": {"type": "string", "description": "Direcao da ordenacao: asc (crescente) ou desc (decrescente).", "enum": ["asc", "desc"], "default": "desc"},
+                        "limit": {"type": "integer", "description": "Quantidade maxima de resultados (padrao 10, maximo 50).", "minimum": 1, "maximum": 50, "default": 10},
+                        "offset": {"type": "integer", "description": "Deslocamento para paginacao (padrao 0).", "minimum": 0, "default": 0},
+                    },
+                },
+                "handler": search_forms,
+                "category": "forms",
+                "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+            },
+            {
+                "name": "glpi_manage_forms",  # 17 chars
+                "description": (
+                    "Formularios nativos do GLPI 11 e catalogo de servicos — operacoes sobre um formulario, secao, pergunta, "
+                    "comentario ou categoria do catalogo. Use action no GLPI: get, create, update, delete (formulario); "
+                    "list_sections, create_section, update_section, delete_section; create_question, update_question, "
+                    "delete_question; create_comment, update_comment, delete_comment; create_category, update_category, "
+                    "delete_category. Acione para montar o catalogo de servicos (solicitar computador, acesso VPN, etc) sem "
+                    "usar a UI. Para LISTAR use glpi_search_forms. Exclusao e destrutiva e pode exigir confirmacao. Retorna Markdown."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "description": "Operacao a executar no GLPI. Formulario: get, create, update, delete. Secoes: list_sections, create_section, update_section, delete_section. Perguntas: create_question, update_question, delete_question. Comentarios: create_comment, update_comment, delete_comment. Categorias do catalogo: create_category, update_category, delete_category.", "enum": ["get", "create", "update", "delete", "list_sections", "create_section", "update_section", "delete_section", "create_question", "update_question", "delete_question", "create_comment", "update_comment", "delete_comment", "create_category", "update_category", "delete_category"]},
+                        "form_id": {"type": "integer", "description": "ID do formulario no GLPI (obrigatorio para get, update, delete, list_sections e create_section)."},
+                        "section_id": {"type": "integer", "description": "ID da secao no GLPI (obrigatorio para create_question, create_comment e para actions de secao)."},
+                        "question_id": {"type": "integer", "description": "ID da pergunta no GLPI (obrigatorio para update_question e delete_question)."},
+                        "comment_id": {"type": "integer", "description": "ID do comentario no GLPI (obrigatorio para update_comment e delete_comment)."},
+                        "category_id": {"type": "integer", "description": "ID da categoria do catalogo (obrigatorio para actions de categoria; em create/update de formulario, a categoria a vincular)."},
+                        "name": {"type": "string", "description": "Nome/titulo do formulario, secao, pergunta, comentario ou categoria (obrigatorio para create de formulario, secao, pergunta e categoria)."},
+                        "description": {"type": "string", "description": "Descricao (texto rico do GLPI). Para o formulario, fica visivel no tile do catalogo."},
+                        "header": {"type": "string", "description": "Cabecalho do formulario, exibido no topo (somente create/update de formulario)."},
+                        "is_active": {"type": "boolean", "description": "Formulario ativo (visivel no catalogo). Somente formulario."},
+                        "is_pinned": {"type": "boolean", "description": "Fixar o formulario no topo do catalogo (sempre visivel). Somente formulario."},
+                        "is_draft": {"type": "boolean", "description": "Marcar o formulario como rascunho. Somente formulario."},
+                        "rank": {"type": "integer", "description": "Ordem da secao dentro do formulario."},
+                        "vertical_rank": {"type": "integer", "description": "Linha do bloco (pergunta/comentario) dentro da secao."},
+                        "horizontal_rank": {"type": "integer", "description": "Coluna do bloco (pergunta/comentario) dentro da linha da secao."},
+                        "parent_id": {"type": "integer", "description": "ID da categoria pai (somente create_category/update_category)."},
+                        "entity_id": {"type": "integer", "description": "ID da entidade (somente create/update de formulario e categoria)."},
+                        "entity_name": {"type": "string", "description": "Nome da entidade, resolvido automaticamente (create/update de formulario e categoria)."},
+                        "type": {"type": "string", "description": "Tipo da pergunta (obrigatorio em create_question). Valores amigaveis: text, email, number, date, radio, checkbox, dropdown, item, item_dropdown, assignee, requester, observer, urgency, request_type, file, user_device, long_answer. Aceita tambem o FQCN do QuestionType."},
+                        "default_value": {"type": "string", "description": "Valor padrao da pergunta. Para radio/checkbox/dropdown use o UUID de uma opcao; para item use JSON {'items_id': N}; para assignee/requester/observer use JSON com users_ids/groups_ids/suppliers_ids."},
+                        "options": {"type": "array", "description": "Lista de rotulos das opcoes (radio, checkbox e dropdown). O GLPI gera o UUID de cada opcao automaticamente.", "items": {"type": "string"}},
+                        "extra_data": {"type": "object", "description": "Configuracao extra da pergunta em chave-valor (ex: {'itemtype': 'Computer'} para item; {'is_multiple_dropdown': 1} para dropdown). Sobrepoe options."},
+                        "is_multiple_dropdown": {"type": "boolean", "description": "Permite multiplas escolhas em pergunta dropdown (default false)."},
+                        "conditions": {"type": "array", "description": "Condicoes de visibilidade (avançado). Formato ConditionData do GLPI: lista de dicts com item_uuid, item_type, value_operator, value, logic_operator.", "items": {"type": "object"}},
+                        "validation_conditions": {"type": "array", "description": "Condicoes de validacao (obrigatoriedade condicional). Mesmo formato de conditions.", "items": {"type": "object"}},
+                        "init_sections": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente a primeira secao (default true).", "default": True},
+                        "init_destinations": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente o destino de ticket (default true).", "default": True},
+                        "init_access_policies": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente a politica de acesso padrao (default true).", "default": True},
+                        "purge": {"type": "boolean", "description": "Se true (padrao), exclui definitivamente; se false, envia para a lixeira do GLPI.", "default": True},
+                        "confirmation_token": {"type": "string", "description": "Token de confirmacao exigido na exclusao quando o safety guard esta ativo."},
+                        "reason": {"type": "string", "description": "Motivo da exclusao (minimo 10 caracteres) quando o safety guard esta ativo."},
+                    },
+                    "required": ["action"],
+                },
+                "handler": manage_forms,
+                "category": "forms",
                 "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True},
             },
             # === BUSCA AVANCADA (1 tool) ===
@@ -1699,6 +1780,7 @@ class MCPHandler:
         "glpi_manage_admin_resources": "admin",
         "glpi_manage_webhook_integrations": "webhooks",
         "glpi_manage_itil_records": "itil",
+        "glpi_manage_forms": "forms",
     }
 
     # Ações que criam registro novo e, portanto, duplicam se repetidas.
@@ -1706,6 +1788,7 @@ class MCPHandler:
     _CREATE_LIKE_ACTIONS = frozenset({
         "create", "add_followup", "add_task", "add_document",
         "link_tickets", "link_ticket", "request_validation", "create_reservation",
+        "create_section", "create_question", "create_comment", "create_category",
     })
 
     # Janela de proteção contra repetição. Curta de propósito: cobre o retry do

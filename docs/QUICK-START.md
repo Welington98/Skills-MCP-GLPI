@@ -77,7 +77,34 @@ PYTHONPATH=. GLPI_MCP_CONFIG=path/to/glpi-config.json \
 
 # Modo produção (PM2)
 pm2 start ecosystem.http.config.js
+
+# Modo Docker (serviço com healthcheck e restart automático)
+docker compose up -d --build
 ```
+
+### Docker (serviço)
+
+A imagem (`Dockerfile`) roda como usuário **não-root** e expõe a porta `8824`.
+A configuração chega pelo ambiente: o `docker-compose.yml` passa o `.env` local
+(`GLPI_BASE_URL`, `GLPI_APP_TOKEN`) e aponta `LOG_FILE` para `/tmp` no
+container. O `GLPI_USER_TOKEN` **não** vai para a imagem nem para o `.env` —
+cada cliente MCP envia o dele via header `X-GLPI-User-Token`.
+
+```bash
+# Build + subir
+docker compose up -d --build
+
+# Logs
+docker logs -f mcp-glpi
+
+# Healthcheck
+curl http://localhost:8824/health
+```
+
+**Multi-instância (um container por cliente):** monte um `glpi-config.json`
+por cliente, aponte `GLPI_MCP_CONFIG` para ele dentro do container e publique
+cada um numa porta diferente (ex.: `-p 8824:8824`, `-p 8825:8824`, …). Veja a
+seção comentada no `docker-compose.yml`.
 
 ## Configuração no Claude Code
 

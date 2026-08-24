@@ -157,6 +157,23 @@ class WriteOperation(str, Enum):
     CONTRACT_DELETE = "contract.delete"
     SUPPLIER_DELETE = "supplier.delete"
 
+    # -- Forms nativos (GLPI 11) / catalogo de servicos ----------------------
+    # Criar/alterar o formulario e criar/alterar sua estrutura (secao, pergunta,
+    # comentario) sao portoes compartilhados; exclusao tem um portao POR TIPO,
+    # porque remover uma pergunta e irreversivel enquanto remover o formulario
+    # inteiro leva junto secoes, perguntas e destinos.
+    FORM_CREATE = "form.create"
+    FORM_UPDATE = "form.update"
+    FORM_DELETE = "form.delete"
+    FORM_STRUCTURE_CREATE = "form.structure_create"
+    FORM_STRUCTURE_UPDATE = "form.structure_update"
+    FORM_SECTION_DELETE = "form.section.delete"
+    FORM_QUESTION_DELETE = "form.question.delete"
+    FORM_COMMENT_DELETE = "form.comment.delete"
+    FORM_CATEGORY_CREATE = "form.category_create"
+    FORM_CATEGORY_UPDATE = "form.category_update"
+    FORM_CATEGORY_DELETE = "form.category.delete"
+
     def __str__(self) -> str:  # pragma: no cover - cosmetic
         return self.value
 
@@ -311,6 +328,43 @@ _SPECS: tuple[WriteOperationSpec, ...] = (
         default_enabled=False, destructive=True,
         safety_guard_operation="delete_supplier",
     ),
+    # -- forms ---------------------------------------------------------------
+    _spec(WriteOperation.FORM_CREATE, "Cadastrar formulario"),
+    _spec(WriteOperation.FORM_UPDATE, "Alterar formulario"),
+    _spec(
+        WriteOperation.FORM_DELETE,
+        "Excluir formulario",
+        default_enabled=False, destructive=True,
+        safety_guard_operation="delete_form",
+    ),
+    _spec(WriteOperation.FORM_STRUCTURE_CREATE, "Adicionar secao, pergunta ou comentario ao formulario"),
+    _spec(WriteOperation.FORM_STRUCTURE_UPDATE, "Alterar secao, pergunta ou comentario do formulario"),
+    _spec(
+        WriteOperation.FORM_SECTION_DELETE,
+        "Excluir secao de formulario",
+        default_enabled=False, destructive=True,
+        safety_guard_operation="delete_form_section",
+    ),
+    _spec(
+        WriteOperation.FORM_QUESTION_DELETE,
+        "Excluir pergunta de formulario",
+        default_enabled=False, destructive=True,
+        safety_guard_operation="delete_form_question",
+    ),
+    _spec(
+        WriteOperation.FORM_COMMENT_DELETE,
+        "Excluir comentario de formulario",
+        default_enabled=False, destructive=True,
+        safety_guard_operation="delete_form_comment",
+    ),
+    _spec(WriteOperation.FORM_CATEGORY_CREATE, "Cadastrar categoria do catalogo de servicos"),
+    _spec(WriteOperation.FORM_CATEGORY_UPDATE, "Alterar categoria do catalogo de servicos"),
+    _spec(
+        WriteOperation.FORM_CATEGORY_DELETE,
+        "Excluir categoria do catalogo de servicos",
+        default_enabled=False, destructive=True,
+        safety_guard_operation="delete_form_category",
+    ),
 )
 
 #: Single source of truth: operation -> spec (name of the env var included).
@@ -376,6 +430,22 @@ _TOOL_ACTION_MAP: Mapping[tuple[str, str], WriteOperation] = MappingProxyType(
         ("itil:projects", "delete"): WriteOperation.PROJECT_DELETE,
         ("itil:contracts", "delete"): WriteOperation.CONTRACT_DELETE,
         ("itil:suppliers", "delete"): WriteOperation.SUPPLIER_DELETE,
+        # forms
+        ("forms", "create"): WriteOperation.FORM_CREATE,
+        ("forms", "update"): WriteOperation.FORM_UPDATE,
+        ("forms", "delete"): WriteOperation.FORM_DELETE,
+        ("forms", "create_section"): WriteOperation.FORM_STRUCTURE_CREATE,
+        ("forms", "update_section"): WriteOperation.FORM_STRUCTURE_UPDATE,
+        ("forms", "delete_section"): WriteOperation.FORM_SECTION_DELETE,
+        ("forms", "create_question"): WriteOperation.FORM_STRUCTURE_CREATE,
+        ("forms", "update_question"): WriteOperation.FORM_STRUCTURE_UPDATE,
+        ("forms", "delete_question"): WriteOperation.FORM_QUESTION_DELETE,
+        ("forms", "create_comment"): WriteOperation.FORM_STRUCTURE_CREATE,
+        ("forms", "update_comment"): WriteOperation.FORM_STRUCTURE_UPDATE,
+        ("forms", "delete_comment"): WriteOperation.FORM_COMMENT_DELETE,
+        ("forms", "create_category"): WriteOperation.FORM_CATEGORY_CREATE,
+        ("forms", "update_category"): WriteOperation.FORM_CATEGORY_UPDATE,
+        ("forms", "delete_category"): WriteOperation.FORM_CATEGORY_DELETE,
     }
 )
 

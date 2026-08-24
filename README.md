@@ -26,6 +26,10 @@
 
 Compatible with **GLPI 10.x** (legacy API v1) and **GLPI 11.x** (current stable).
 
+**What's new in 2.3** (August 2026):
+
+- **Native forms & service catalog** — the GLPI 11 Forms module is now first-class: search forms and catalog categories (`glpi_search_forms`), and build the catalog end-to-end without the UI (`glpi_manage_forms`): forms, sections, questions, comments and categories, with friendly question types and auto-uuid'd options.
+
 **What's new in 2.2** (August 2026):
 
 - **ITIL beyond the ticket** — problems, changes, projects, contracts and suppliers are now first-class, through `glpi_search_itil_records` and `glpi_manage_itil_records`.
@@ -38,9 +42,9 @@ Compatible with **GLPI 10.x** (legacy API v1) and **GLPI 11.x** (current stable)
 
 The v1.0 approach (68 tools, raw JSON responses) caused **token explosion** — typical GLPI queries consumed 50-100K tokens with limited reusability. v2.0 fixes this with a consolidated, Markdown-first design:
 
-| Aspect | v1.0 | v2.2 |
+| Aspect | v1.0 | v2.3 |
 |--------|------|------|
-| **Tools** | 68 fragmented | **18 consolidated** ✨ |
+| **Tools** | 68 fragmented | **20 consolidated** ✨ |
 | **Response Format** | Raw JSON (verbose) | **Markdown (compact)** ✨ |
 | **Token Efficiency** | ~100K per operation | **15-30K per operation** ✨ |
 | **Tool Annotations** | None | **Read-only & destructive hints** ✨ |
@@ -54,7 +58,7 @@ The v1.0 approach (68 tools, raw JSON responses) caused **token explosion** — 
 ## 🎯 Key Improvements
 
 ### 1. **Consolidated Toolkit**
-- **18 production tools** organized by domain (Tickets, ITIL, Assets, Admin, Webhooks, Knowledge, Bridge)
+- **20 production tools** organized by domain (Tickets, ITIL, Forms, Assets, Admin, Webhooks, Knowledge, Bridge)
 - **search_* + manage_*** pattern: Clear separation of read-only vs mutation operations
 - Each tool handles 4-8 related operations, reducing context overhead
 
@@ -189,7 +193,38 @@ python -m uvicorn src.main:app --host 0.0.0.0 --port 8824 --reload
 
 # Production (with PM2)
 pm2 start ecosystem.config.cjs
+
+# Docker (as a service — recommended)
+docker compose up -d --build
 ```
+
+### Docker
+
+O servidor roda como serviço Docker, com healthcheck, `restart: unless-stopped`
+e usuário não-root. A configuração vem do `.env` local (URL + App Token); o
+`GLPI_USER_TOKEN` não entra na imagem nem no `.env` — cada cliente MCP envia o
+dele por request.
+
+```bash
+# Build + subir em background (porta 8824)
+docker compose up -d --build
+
+# Logs
+docker logs -f mcp-glpi
+
+# Reiniciar apos mudar o .env
+docker compose up -d
+```
+
+Verificação:
+
+```bash
+curl http://localhost:8824/health
+```
+
+> **Multi-instância (um container por cliente):** monte um `glpi-config.json`
+> por cliente e aponte `GLPI_MCP_CONFIG` para ele, publicando cada um numa
+> porta. Veja `docker-compose.yml` (seção comentada) e `docs/QUICK-START.md`.
 
 ### Connect to Claude Code
 
@@ -233,6 +268,13 @@ curl http://localhost:8824/health
 |------|-------------|
 | `glpi_search_itil_records` | Search **problems, changes, projects, contracts and suppliers** (`record_type`). Filters: query, status, priority, urgency, category, entity, date range + `date_field`, sort, and **`count_only`** for a cheap total |
 | `glpi_manage_itil_records` | CRUD + `add_followup`/`get_followups`/`link_ticket` across the same five record types |
+
+### 📋 Forms / Service Catalog (2 tools) — *new*
+
+| Tool | Description |
+|------|-------------|
+| `glpi_search_forms` | Search the **native GLPI 11 forms** (module Forms) and the service-catalog categories (`scope=forms`/`categories`). Filters: query, category, entity, active status, sort |
+| `glpi_manage_forms` | Build the **service catalog** without the UI: CRUD of a form, its sections, questions, comments and catalog categories. Question types by friendly name (`text`, `email`, `radio`, `dropdown`, `item`, `assignee`, …), radio/checkbox/dropdown options auto-uuid'd. Deletes are safety-guarded |
 
 ### 🔍 Free-Criteria Search (1 tool) — *new in 2.2*
 

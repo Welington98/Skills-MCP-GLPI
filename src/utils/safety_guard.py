@@ -72,6 +72,12 @@ class SafetyGuard:
         "delete_project": "Deletar projeto permanentemente",
         "delete_contract": "Deletar contrato permanentemente",
         "delete_supplier": "Deletar fornecedor permanentemente",
+        # Formularios nativos do GLPI 11 (catalogo de servicos)
+        "delete_form": "Deletar formulario permanentemente",
+        "delete_form_section": "Deletar secao de formulario permanentemente",
+        "delete_form_question": "Deletar pergunta de formulario permanentemente",
+        "delete_form_comment": "Deletar comentario de formulario permanentemente",
+        "delete_form_category": "Deletar categoria do catalogo permanentemente",
     }
     
     MIN_TOKEN_LENGTH = 8

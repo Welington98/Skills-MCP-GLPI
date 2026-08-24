@@ -1,0 +1,31 @@
+# Credenciais e config local nunca entram na imagem
+.env
+.env.*
+glpi-config.json
+
+# Controle de versao
+.git/
+.gitignore
+
+# Ambiente local / venvs
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Logs e dados locais
+logs/
+*.log
+var/
+
+# Testes e docs nao fazem parte da imagem de runtime
+tests/
+docs/
+scripts/
+*.md
+CHANGELOG.md
+
+# Base de conhecimento opcional (pgvector) — NAO incluida por padrao
+knowledge_base/
