@@ -965,11 +965,16 @@ Operações sobre **um** formulário, secão, pergunta, comentário ou categoria
 | `vertical_rank` / `horizontal_rank` | integer | Não | Posição do bloco na seção |
 | `parent_id` | integer | Não | Categoria pai |
 | `type` | string | create_question | Tipo da pergunta (ver abaixo) |
+| `is_mandatory` | boolean | Não | Marca a pergunta como obrigatória |
 | `default_value` | string | Não | Valor padrão da pergunta |
 | `options` | array | Não | Rótulos das opções (radio/checkbox/dropdown) |
 | `extra_data` | object | Não | Configuração extra da pergunta |
 | `is_multiple_dropdown` | boolean | Não | Multi-escolha em dropdown |
-| `conditions` / `validation_conditions` | array | Não | Condições de visibilidade/validação (avançado) |
+| `conditions` / `validation_conditions` | array | Não | Condições de visibilidade/validação — o campo `item_uuid` de cada regra é o **UUID** da pergunta-gatilho (obtido via `get` / `get_question`) |
+| `destination_id` | integer | get/update_destination | ID do destino (aba Chamado) |
+| `urgency_question_id` | integer | update_destination | ID da pergunta cuja resposta define a **Urgência** do chamado (ex: Criticidade) — equivale a "Resposta da pergunta" na aba Chamado |
+| `urgency_strategy` | string | update_destination | Estratégia da Urgência: `specific_answer` (padrão), `from_template`, `specific_value`, `last_valid_answer` |
+| `config` | object | update_destination | Config do destino em chave-valor bruto (mesclada sobre a atual) |
 | `init_sections` / `init_destinations` / `init_access_policies` | boolean | Não | Desativa o auto-bootstrap no create do formulário |
 | `purge` | boolean | Não | `true` (padrão) exclui definitivamente |
 | `confirmation_token` / `reason` | — | delete | Confirmam exclusão quando o safety guard está ativo |
@@ -993,6 +998,9 @@ Operações sobre **um** formulário, secão, pergunta, comentário ou categoria
 | `create_category` | `name` | Cria categoria do catálogo |
 | `update_category` | `category_id` | Altera categoria |
 | `delete_category` | `category_id` | Exclui categoria |
+| `list_destinations` | `form_id` | Lista os destinos (aba Chamado) do formulário |
+| `get_destination` | `destination_id` | Detalhe do destino com a configuração de campos do ticket |
+| `update_destination` | `destination_id` | Altera o destino (nome e/ou config); ex: `urgency_question_id` mapeia a Urgência do chamado para a resposta da pergunta |
 
 **Tipos de pergunta (`type`)**: `text`, `email`, `number`, `long_answer`,
 `date`, `radio`, `checkbox`, `dropdown`, `item` (objeto GLPI),

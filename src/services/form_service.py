@@ -58,6 +58,20 @@ SECTION_ITEMTYPE = "Glpi\\Form\\Section"
 QUESTION_ITEMTYPE = "Glpi\\Form\\Question"
 COMMENT_ITEMTYPE = "Glpi\\Form\\Comment"
 CATEGORY_ITEMTYPE = "Glpi\\Form\\Category"
+DESTINATION_ITEMTYPE = "Glpi\\Form\\Destination\\FormDestination"
+
+#: Chave (slug do FQCN) usada no config JSON do destino para o campo Urgencia.
+#: GLPI serializa cada configurable field sob ``Toolbox::slugify(FQCN)`` — ver
+#: AbstractConfigField::getKey(). Estavel na linha 11.x.
+DESTINATION_URGENCY_FIELD_KEY = "glpi-form-destination-commonitilfield-urgencyfield"
+
+#: Estrategias do campo Urgencia do destino (enum UrgencyFieldStrategy).
+URGENCY_FIELD_STRATEGIES = {
+    "from_template": "from_template",
+    "specific_value": "specific_value",
+    "specific_answer": "specific_answer",
+    "last_valid_answer": "last_valid_answer",
+}
 
 _QUESTION_TYPE_NS = "Glpi\\Form\\QuestionType\\"
 
@@ -252,6 +266,7 @@ SECTION_ENC = quote(SECTION_ITEMTYPE, safe="")
 QUESTION_ENC = quote(QUESTION_ITEMTYPE, safe="")
 COMMENT_ENC = quote(COMMENT_ITEMTYPE, safe="")
 CATEGORY_ENC = quote(CATEGORY_ITEMTYPE, safe="")
+DESTINATION_ENC = quote(DESTINATION_ITEMTYPE, safe="")
 
 _form_field_sync_done = False
 _form_field_sync_lock = asyncio.Lock()
@@ -712,6 +727,7 @@ class FormService:
         name: str,
         type: str,
         description: Optional[str] = None,
+        is_mandatory: Optional[bool] = None,
         default_value: Any = None,
         extra_data: Optional[Dict[str, Any]] = None,
         options: Optional[List[str]] = None,
@@ -729,6 +745,7 @@ class FormService:
             name=name,
             type=type,
             description=description,
+            is_mandatory=is_mandatory,
             default_value=default_value,
             extra_data=extra_data,
             options=options,
@@ -778,6 +795,8 @@ class FormService:
             payload["name"] = name
         if fields.get("description") is not None:
             payload["description"] = fields["description"]
+        if fields.get("is_mandatory") is not None:
+            payload["is_mandatory"] = int(bool(fields["is_mandatory"]))
 
         if fields.get("section_id") is not None:
             payload["forms_sections_id"] = _require_id(fields["section_id"], "section_id")
@@ -989,6 +1008,104 @@ class FormService:
             endpoint += "?force_purge=true"
         await glpi_client.delete(endpoint)
         return {"id": category_id, "purged": purge}
+
+    # ======================================================================
+    # DESTINOS (aba "Chamado" do formulario)
+    # ======================================================================
+
+    async def list_destinations(self, form_id: int) -> List[Dict[str, Any]]:
+        """List the destinations of a form (each destination maps to a Ticket)."""
+        form_id = _require_id(form_id, "form_id")
+        try:
+            rows = await glpi_client.get(
+                f"/apirest.php/{FORM_ENC}/{form_id}/{DESTINATION_ENC}",
+                params={"range": "0-49"},
+                use_cache=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _raise_form_endpoint_error(exc)
+            raise
+        return [d for d in (rows if isinstance(rows, list) else []) if isinstance(d, dict)]
+
+    async def get_destination(self, destination_id: int) -> Dict[str, Any]:
+        """Fetch one destination with its decoded ``config`` field."""
+        destination_id = _require_id(destination_id, "destination_id")
+        item = await glpi_client.get(
+            f"/apirest.php/{DESTINATION_ENC}/{destination_id}", use_cache=False
+        )
+        if not isinstance(item, dict) or "id" not in item:
+            raise NotFoundError(DESTINATION_ITEMTYPE, destination_id)
+        return self._decode_destination_config(item)
+
+    async def update_destination(
+        self,
+        destination_id: int,
+        *,
+        name: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        urgency_question_id: Optional[int] = None,
+        urgency_strategy: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update a destination, merging the given config over the stored one.
+
+        ``urgency_question_id`` sets the Ticket Urgency field to mirror the
+        answer of the given question (strategy ``specific_answer``) — the
+        "Resposta da pergunta: Criticidade" mapping. Provide ``config`` for
+        raw control of the whole destination config.
+        """
+        destination_id = _require_id(destination_id, "destination_id")
+        current = await self.get_destination(destination_id)
+        merged = dict(current.get("config") or {})
+
+        if config is not None:
+            if not isinstance(config, dict):
+                raise ValidationError("config deve ser um objeto de configuracoes", "config")
+            merged.update(config)
+
+        if urgency_question_id is not None:
+            strategy = URGENCY_FIELD_STRATEGIES.get(
+                str(urgency_strategy).strip().lower().replace(" ", "_")
+                if urgency_strategy
+                else "",
+                "specific_answer",
+            )
+            merged[DESTINATION_URGENCY_FIELD_KEY] = {
+                "strategy": strategy,
+                "specific_question_id": _require_id(
+                    urgency_question_id, "urgency_question_id"
+                ),
+                "specific_urgency_value": None,
+            }
+
+        if not merged and name is None:
+            raise ValidationError(
+                "Nenhuma alteracao fornecida para o destino", "payload"
+            )
+
+        payload: Dict[str, Any] = {}
+        if name is not None:
+            payload["name"] = name
+        if merged:
+            payload["config"] = merged
+        await glpi_client.put(f"/apirest.php/{DESTINATION_ENC}/{destination_id}", payload)
+        return await self.get_destination(destination_id)
+
+    @staticmethod
+    def _decode_destination_config(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Decode the destination ``config`` JSON string into a dict."""
+        raw = item.get("config")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                decoded = json.loads(raw)
+            except (TypeError, ValueError):
+                decoded = {}
+        else:
+            decoded = raw
+        if not isinstance(decoded, dict):
+            # GLPI grava `[]` quando o destino usa somente defaults.
+            decoded = {}
+        item["config"] = decoded
+        return item
 
 
 # Instancia global do servico de formularios

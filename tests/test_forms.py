@@ -22,6 +22,8 @@ Other invariants under test:
 
 from unittest.mock import AsyncMock, patch
 
+import json
+
 import pytest
 
 from src.models.exceptions import GLPIError, ValidationError
@@ -30,6 +32,8 @@ from src.security.write_policy import (
     resolve_operation,
 )
 from src.services.form_service import (
+    DESTINATION_ENC,
+    DESTINATION_URGENCY_FIELD_KEY,
     FORM_ENC,
     QUESTION_ENC,
     resolve_question_type,
@@ -244,6 +248,41 @@ class TestFormServiceEndpoints:
         # is_multiple_dropdown so faz sentido em dropdown — nao pode vazar p/ radio.
         assert "is_multiple_dropdown" not in payload["extra_data"]
 
+    async def test_create_question_posts_is_mandatory(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.post",
+            new=AsyncMock(return_value={"id": 9}),
+        ) as post, patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={"id": 9, "name": "Contexto"}),
+        ):
+            await form_service.create_question(
+                section_id=3, name="Contexto", type="text", is_mandatory=True
+            )
+        assert post.await_args.args[1]["is_mandatory"] == 1
+
+    async def test_update_question_posts_is_mandatory(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.put",
+            new=AsyncMock(return_value={}),
+        ) as put, patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={"id": 9, "name": "Contexto"}),
+        ):
+            await form_service.update_question(9, is_mandatory=True)
+        assert put.await_args.args[1] == {"is_mandatory": 1}
+
+    async def test_question_payload_omits_unset_is_mandatory(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.post",
+            new=AsyncMock(return_value={"id": 9}),
+        ) as post, patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={"id": 9, "name": "Contexto"}),
+        ):
+            await form_service.create_question(section_id=3, name="Contexto", type="text")
+        assert "is_mandatory" not in post.await_args.args[1]
+
     async def test_delete_form_purges_via_query_flag(self) -> None:
         with patch(
             "src.services.form_service.glpi_client.delete",
@@ -259,6 +298,68 @@ class TestFormServiceEndpoints:
         ) as delete:
             await form_service.delete_question(5)
         delete.assert_awaited_once_with(f"/apirest.php/{QUESTION_ENC}/5?force_purge=true")
+
+    async def test_list_destinations_uses_encoded_itemtype(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value=[{"id": 30, "name": "Chamado"}]),
+        ) as get:
+            rows = await form_service.list_destinations(24)
+        assert len(rows) == 1
+        get.assert_awaited_once()
+        assert get.await_args.args[0] == f"/apirest.php/{FORM_ENC}/24/{DESTINATION_ENC}"
+
+    async def test_get_destination_decodes_config_json(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={"id": 30, "name": "Chamado", "config": "[]"}),
+        ):
+            item = await form_service.get_destination(30)
+        assert item["config"] == {}
+
+    async def test_update_destination_sets_urgency_from_question(self) -> None:
+        stored = {
+            "id": 30,
+            "name": "Chamado",
+            "config": "[]",
+        }
+        with patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value=stored),
+        ) as get, patch(
+            "src.services.form_service.glpi_client.put",
+            new=AsyncMock(return_value={}),
+        ) as put:
+            # get_destination e chamado duas vezes: leitura + pos-escrita.
+            get.side_effect = [stored, dict(stored, config='{"' + DESTINATION_URGENCY_FIELD_KEY + '":{"strategy":"specific_answer","specific_question_id":122,"specific_urgency_value":null}}')]
+            item = await form_service.update_destination(30, urgency_question_id=122)
+
+        put.assert_awaited_once()
+        sent = put.await_args.args[1]
+        assert sent["config"][DESTINATION_URGENCY_FIELD_KEY] == {
+            "strategy": "specific_answer",
+            "specific_question_id": 122,
+            "specific_urgency_value": None,
+        }
+        assert item["config"][DESTINATION_URGENCY_FIELD_KEY]["specific_question_id"] == 122
+
+    async def test_update_destination_merges_with_existing_config(self) -> None:
+        existing_key = "glpi-form-destination-commonitilfield-titlefield"
+        with patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={
+                "id": 30,
+                "name": "Chamado",
+                "config": json.dumps({existing_key: {"strategy": "from_template"}}),
+            }),
+        ), patch(
+            "src.services.form_service.glpi_client.put",
+            new=AsyncMock(return_value={}),
+        ) as put:
+            await form_service.update_destination(30, urgency_question_id=122)
+        sent = put.await_args.args[1]["config"]
+        assert existing_key in sent  # config preexistente preservada
+        assert DESTINATION_URGENCY_FIELD_KEY in sent
 
     async def test_get_form_embeds_sections(self) -> None:
         sections = [{"id": 3, "name": "S1"}, {"id": 4, "name": "S2"}]
@@ -372,6 +473,52 @@ class TestManageFormsTool:
         ):
             with pytest.raises(ValidationError):
                 await manage_forms(action="update", form_id=1, render_layout="carrossel")
+
+    async def test_create_question_passes_is_mandatory(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.form_service.create_question",
+            new=AsyncMock(return_value={"id": 1, "name": "Contexto"}),
+        ) as create:
+            await manage_forms(
+                action="create_question", section_id=1, name="Contexto",
+                type="text", is_mandatory=True,
+            )
+        assert create.await_args.kwargs["is_mandatory"] is True
+
+    async def test_update_question_omits_unset_is_mandatory(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.form_service.update_question",
+            new=AsyncMock(return_value={"id": 1, "name": "Contexto"}),
+        ) as update:
+            await manage_forms(action="update_question", question_id=1, name="Y")
+        assert update.await_args.kwargs["is_mandatory"] is None
+
+    async def test_list_destinations_requires_form_id(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.form_service.list_destinations",
+            new=AsyncMock(return_value=[]),
+        ):
+            with pytest.raises(ValidationError):
+                await manage_forms(action="list_destinations")
+
+    async def test_update_destination_forwards_urgency_question(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.form_service.update_destination",
+            new=AsyncMock(return_value={
+                "id": 30,
+                "name": "Chamado",
+                "config": {DESTINATION_URGENCY_FIELD_KEY: {
+                    "strategy": "specific_answer",
+                    "specific_question_id": 122,
+                }},
+            }),
+        ) as update:
+            text = await manage_forms(
+                action="update_destination", destination_id=30, urgency_question_id=122
+            )
+        kwargs = update.await_args.kwargs
+        assert kwargs["urgency_question_id"] == 122
+        assert "122" in text  # renderiza a pergunta da urgencia
 
     async def test_create_question_requires_type(self) -> None:
         result = await manage_forms(action="create_question", section_id=1, name="X")

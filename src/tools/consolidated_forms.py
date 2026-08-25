@@ -18,6 +18,7 @@ All rendering lives here on purpose: this module owns its Markdown so it can
 ship without touching the shared formatters.
 """
 
+import json
 from typing import Any, Dict, List, Optional
 
 from src.formatters.markdown_helpers import (
@@ -29,6 +30,7 @@ from src.formatters.markdown_helpers import (
 )
 from src.models.exceptions import GLPIError, NotFoundError, ValidationError
 from src.services.form_service import (
+    DESTINATION_URGENCY_FIELD_KEY,
     RENDER_LAYOUT_LABELS,
     form_service,
     resolve_question_type,
@@ -56,10 +58,12 @@ MANAGE_ACTIONS = [
     "get_comment", "create_comment", "update_comment", "delete_comment",
     # catalog categories
     "get_category", "create_category", "update_category", "delete_category",
+    # destinations (aba "Chamado")
+    "list_destinations", "get_destination", "update_destination",
 ]
 
 ACTIONS_REQUIRING_FORM_ID = [
-    "get", "update", "delete", "list_sections", "create_section",
+    "get", "update", "delete", "list_sections", "create_section", "list_destinations",
 ]
 
 #: Safety-guard operation name per delete action.
@@ -228,9 +232,17 @@ def _format_form_detail(item: Dict[str, Any]) -> str:
                 if not isinstance(q, dict):
                     continue
                 q_name = strip_html(str(q.get("name") or "")).strip() or "(sem titulo)"
+                flags = []
+                if _fmt_bool(q.get("is_mandatory")) == "Sim":
+                    flags.append("obrigatoria")
+                conds = _parse_conditions(q.get("conditions"))
+                if conds:
+                    flags.append(f"{len(conds)} condicao(oes) de visibilidade")
+                suffix = f", {', '.join(flags)}" if flags else ""
                 lines.append(
                     f"- **Pergunta:** {esc(q_name)} "
-                    f"(_tipo:_ {_fmt_question_type(q.get('type'))}, ID {q.get('id')})"
+                    f"(_tipo:_ {_fmt_question_type(q.get('type'))}, ID {q.get('id')}, "
+                    f"UUID `{q.get('uuid') or '?'}`{suffix})"
                 )
             comments = section.get("comments") or []
             for c in comments:
@@ -250,6 +262,7 @@ def _format_simple_detail(label: str, item: Dict[str, Any]) -> str:
     title = strip_html(str(item.get("name") or "")).strip() or "(sem titulo)"
     lines = [f"# {label} {esc(item.get('id'))} — {esc(title)}"]
     for key, field_label in (
+        ("uuid", "UUID"),
         ("description", "Descricao"),
         ("forms_sections_id", "Secao"),
         ("forms_forms_id", "Formulario"),
@@ -258,6 +271,7 @@ def _format_simple_detail(label: str, item: Dict[str, Any]) -> str:
         ("rank", "Ordem"),
         ("vertical_rank", "Linha"),
         ("horizontal_rank", "Coluna"),
+        ("is_mandatory", "Obrigatoria"),
         ("default_value", "Valor padrao"),
         ("extra_data", "Configuracao"),
     ):
@@ -269,7 +283,73 @@ def _format_simple_detail(label: str, item: Dict[str, Any]) -> str:
         value = str(value)
         if key == "type":
             value = _fmt_question_type(value)
+        elif key == "is_mandatory":
+            value = _fmt_bool(value)
         lines.append(f"- **{field_label}:** {esc(truncate_field(strip_html(value), 500) or '—')}")
+
+    for cond_key, cond_label in (
+        ("conditions", "Condicoes de visibilidade"),
+        ("validation_conditions", "Condicoes de validacao"),
+    ):
+        raw = item.get(cond_key)
+        if not raw:
+            continue
+        conds = _parse_conditions(raw)
+        if not conds:
+            lines.append(f"- **{cond_label}:** —")
+        else:
+            lines.append(f"- **{cond_label}:** {len(conds)} regra(s)")
+            for index, cond in enumerate(conds, start=1):
+                if not isinstance(cond, dict):
+                    continue
+                lines.append(
+                    f"  {index}. item_uuid=`{cond.get('item_uuid') or cond.get('question_uuid') or '?'}` "
+                    f"item_type=`{cond.get('item_type') or '?'}` "
+                    f"operador=`{cond.get('value_operator') or '?'}` "
+                    f"valor=`{cond.get('value') or ''}`"
+                )
+    return "\n".join(lines)
+
+
+def _parse_conditions(raw: Any) -> List[Dict[str, Any]]:
+    """Parse the conditions JSON column into a list of condition dicts."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict):
+            return [parsed]
+    return []
+
+
+def _format_destination_detail(item: Dict[str, Any]) -> str:
+    if not item:
+        return "Destino nao encontrado."
+    title = strip_html(str(item.get("name") or "")).strip() or "(sem titulo)"
+    lines = [
+        f"# Destino {esc(item.get('id'))} — {esc(title)}",
+        "",
+        f"- **Formulario:** {esc(item.get('forms_forms_id') or 'N/A')}",
+        f"- **Tipo:** {esc((item.get('itemtype') or '').rsplit('\\\\', 1)[-1] or 'N/A')}",
+    ]
+    config = item.get("config") or {}
+    if isinstance(config, str):
+        config = _parse_conditions(config)  # tolerant: may be a dict
+        if isinstance(config, dict):
+            config = config
+        elif isinstance(config, list) and not config:
+            config = {}
+    urgency = config.get(DESTINATION_URGENCY_FIELD_KEY) if isinstance(config, dict) else None
+    if urgency:
+        lines.append(f"- **Urgencia do chamado:** resposta da pergunta `{urgency.get('specific_question_id')}` (estrategia `{urgency.get('strategy')}`)")
+    if isinstance(config, dict) and len(config) > 1:
+        lines.append(f"- **Outras configs de campo:** {', '.join(sorted(config))}")
+    lines.append(f"- **Configuracao bruta:** {esc(json.dumps(config, ensure_ascii=False)[:2000])}")
     return "\n".join(lines)
 
 
@@ -367,6 +447,7 @@ async def manage_forms(
     question_id: Optional[int] = None,
     comment_id: Optional[int] = None,
     category_id: Optional[int] = None,
+    destination_id: Optional[int] = None,
     # form / section / question / comment / category content
     name: Optional[str] = None,
     description: Optional[str] = None,
@@ -383,12 +464,17 @@ async def manage_forms(
     entity_name: Optional[str] = None,
     # question specifics
     type: Optional[str] = None,
+    is_mandatory: Optional[bool] = None,
     default_value: Any = None,
     extra_data: Optional[Dict[str, Any]] = None,
     options: Optional[List[str]] = None,
     is_multiple_dropdown: Optional[bool] = None,
     conditions: Optional[List[Dict[str, Any]]] = None,
     validation_conditions: Optional[List[Dict[str, Any]]] = None,
+    # destination specifics (aba "Chamado")
+    config: Optional[Dict[str, Any]] = None,
+    urgency_question_id: Optional[int] = None,
+    urgency_strategy: Optional[str] = None,
     # create-form defaults
     init_sections: bool = True,
     init_destinations: bool = True,
@@ -398,7 +484,7 @@ async def manage_forms(
     confirmation_token: Optional[str] = None,
     reason: Optional[str] = None,
 ) -> Any:
-    """Read and mutate one form, section, question, comment or category."""
+    """Read and mutate one form, section, question, comment, category or destination."""
     try:
         action = str(action or "").strip()
         if action not in MANAGE_ACTIONS:
@@ -414,11 +500,13 @@ async def manage_forms(
         question_id = _coerce_int(question_id)
         comment_id = _coerce_int(comment_id)
         category_id = _coerce_int(category_id)
+        destination_id = _coerce_int(destination_id)
         rank = _coerce_int(rank)
         vertical_rank = _coerce_int(vertical_rank)
         horizontal_rank = _coerce_int(horizontal_rank)
         parent_id = _coerce_int(parent_id)
         entity_id = _coerce_int(entity_id)
+        urgency_question_id = _coerce_int(urgency_question_id)
         # @MX:WARN: is_active/is_pinned/is_draft sao preservados crus aqui.
         # @MX:REASON: _coerce_bool(None) -> False. Coagir no topo tornava o
         # default "None significa nao informado" impossivel: no create, is_active
@@ -427,6 +515,9 @@ async def manage_forms(
         # acao e conhecido.
         is_multiple_dropdown = (
             None if is_multiple_dropdown is None else _coerce_bool(is_multiple_dropdown)
+        )
+        is_mandatory = (
+            None if is_mandatory is None else _coerce_bool(is_mandatory)
         )
         init_sections = _coerce_bool(init_sections)
         init_destinations = _coerce_bool(init_destinations)
@@ -583,6 +674,7 @@ async def manage_forms(
                 name=name,
                 type=type,
                 description=description,
+                is_mandatory=is_mandatory,
                 default_value=default_value,
                 extra_data=extra_data,
                 options=options,
@@ -600,6 +692,7 @@ async def manage_forms(
                 name=name,
                 description=description,
                 type=type,
+                is_mandatory=is_mandatory,
                 default_value=default_value,
                 extra_data=extra_data,
                 options=options,
@@ -674,6 +767,35 @@ async def manage_forms(
                 _require_id(category_id, "category_id"), purge=purge
             )
             return _format_mutation(action, result)
+
+        # ---- destination writes (aba "Chamado") ---------------------------
+        if action == "list_destinations":
+            destinations = await form_service.list_destinations(
+                _require_id(form_id, "form_id")
+            )
+            if not destinations:
+                return "Nenhum destino encontrado no formulario."
+            lines = [f"**{len(destinations)} destino(s)** do formulario {form_id}:"]
+            for index, destination in enumerate(destinations, start=1):
+                d_name = strip_html(str(destination.get("name") or "")).strip() or "(sem titulo)"
+                lines.append(f"{index}. {esc(d_name)} (ID {destination.get('id')})")
+            return "\n".join(lines)
+
+        if action == "get_destination":
+            item = await form_service.get_destination(
+                _require_id(destination_id, "destination_id")
+            )
+            return _format_destination_detail(item)
+
+        if action == "update_destination":
+            item = await form_service.update_destination(
+                _require_id(destination_id, "destination_id"),
+                name=name,
+                config=config,
+                urgency_question_id=urgency_question_id,
+                urgency_strategy=urgency_strategy,
+            )
+            return _format_destination_detail(item)
 
         return create_mcp_error(
             f"Acao '{action}' nao tratada",

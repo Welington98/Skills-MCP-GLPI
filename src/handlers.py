@@ -615,23 +615,26 @@ class MCPHandler:
             {
                 "name": "glpi_manage_forms",  # 17 chars
                 "description": (
-                    "Formularios nativos do GLPI 11 e catalogo de servicos — operacoes sobre um formulario, secao, pergunta, "
-                    "comentario ou categoria do catalogo. Use action no GLPI: get, create, update, delete (formulario); "
-                    "list_sections, create_section, update_section, delete_section; create_question, update_question, "
-                    "delete_question; create_comment, update_comment, delete_comment; create_category, update_category, "
-                    "delete_category. Acione para montar o catalogo de servicos (solicitar computador, acesso VPN, etc) sem "
-                    "usar a UI. Para LISTAR use glpi_search_forms. Exclusao e destrutiva e pode exigir confirmacao. Retorna Markdown."
+                    "Formularios nativos do GLPI 11 e catalogo de servicos — operacoes sobre formulario, secao, pergunta, "
+                    "comentario, categoria ou destino (aba Chamado; ex. mapear Urgencia para resposta da pergunta Criticidade). "
+                    "Actions: get/create/update/delete; list_sections, create_section, update_section, "
+                    "delete_section; create_question, update_question, delete_question; create_comment, update_comment, "
+                    "delete_comment; create_category, update_category, delete_category; list_destinations, "
+                    "get_destination, update_destination. Acione para montar o catalogo de servicos "
+                    "sem usar a UI. Para LISTAR use glpi_search_forms. Exclusao e destrutiva e pode "
+                    "exigir confirmacao. Retorna Markdown."
                 ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string", "description": "Operacao a executar no GLPI. Formulario: get, create, update, delete. Secoes: list_sections, create_section, update_section, delete_section. Perguntas: create_question, update_question, delete_question. Comentarios: create_comment, update_comment, delete_comment. Categorias do catalogo: create_category, update_category, delete_category.", "enum": ["get", "create", "update", "delete", "list_sections", "create_section", "update_section", "delete_section", "create_question", "update_question", "delete_question", "create_comment", "update_comment", "delete_comment", "create_category", "update_category", "delete_category"]},
-                        "form_id": {"type": "integer", "description": "ID do formulario no GLPI (obrigatorio para get, update, delete, list_sections e create_section)."},
+                        "action": {"type": "string", "description": "Operacao a executar no GLPI. Formulario: get, create, update, delete. Secoes: list_sections, create_section, update_section, delete_section. Perguntas: create_question, update_question, delete_question. Comentarios: create_comment, update_comment, delete_comment. Categorias do catalogo: create_category, update_category, delete_category. Destinos do chamado: list_destinations, get_destination, update_destination.", "enum": ["get", "create", "update", "delete", "list_sections", "create_section", "update_section", "delete_section", "create_question", "update_question", "delete_question", "create_comment", "update_comment", "delete_comment", "create_category", "update_category", "delete_category", "list_destinations", "get_destination", "update_destination"]},
+                        "form_id": {"type": "integer", "description": "ID do formulario no GLPI (obrigatorio para get, update, delete, list_sections, create_section e list_destinations)."},
                         "section_id": {"type": "integer", "description": "ID da secao no GLPI (obrigatorio para create_question, create_comment e para actions de secao)."},
                         "question_id": {"type": "integer", "description": "ID da pergunta no GLPI (obrigatorio para update_question e delete_question)."},
                         "comment_id": {"type": "integer", "description": "ID do comentario no GLPI (obrigatorio para update_comment e delete_comment)."},
                         "category_id": {"type": "integer", "description": "ID da categoria do catalogo (obrigatorio para actions de categoria; em create/update de formulario, a categoria a vincular)."},
-                        "name": {"type": "string", "description": "Nome/titulo do formulario, secao, pergunta, comentario ou categoria (obrigatorio para create de formulario, secao, pergunta e categoria)."},
+                        "destination_id": {"type": "integer", "description": "ID do destino (aba Chamado) no GLPI (obrigatorio para get_destination e update_destination)."},
+                        "name": {"type": "string", "description": "Nome/titulo do formulario, secao, pergunta, comentario, categoria ou destino (obrigatorio para create de formulario, secao, pergunta e categoria)."},
                         "description": {"type": "string", "description": "Descricao (texto rico do GLPI). Para o formulario, fica visivel no tile do catalogo."},
                         "header": {"type": "string", "description": "Cabecalho do formulario, exibido no topo (somente create/update de formulario)."},
                         "render_layout": {"type": "string", "description": "Layout de exibicao do formulario no catalogo: single_page (todas as secoes em uma unica pagina) ou step_by_step (secao por secao, padrao). Somente create/update de formulario.", "enum": ["single_page", "step_by_step"]},
@@ -645,12 +648,16 @@ class MCPHandler:
                         "entity_id": {"type": "integer", "description": "ID da entidade (somente create/update de formulario e categoria)."},
                         "entity_name": {"type": "string", "description": "Nome da entidade, resolvido automaticamente (create/update de formulario e categoria)."},
                         "type": {"type": "string", "description": "Tipo da pergunta (obrigatorio em create_question). Valores amigaveis: text, email, number, date, radio, checkbox, dropdown, item, item_dropdown, assignee, requester, observer, urgency, request_type, file, user_device, long_answer. Aceita tambem o FQCN do QuestionType."},
+                        "is_mandatory": {"type": "boolean", "description": "Marca a pergunta como obrigatoria (true) ou opcional (false). Somente create_question/update_question."},
                         "default_value": {"type": "string", "description": "Valor padrao da pergunta. Para radio/checkbox/dropdown use o UUID de uma opcao; para item use JSON {'items_id': N}; para assignee/requester/observer use JSON com users_ids/groups_ids/suppliers_ids."},
                         "options": {"type": "array", "description": "Lista de rotulos das opcoes (radio, checkbox e dropdown). O GLPI gera o UUID de cada opcao automaticamente.", "items": {"type": "string"}},
                         "extra_data": {"type": "object", "description": "Configuracao extra da pergunta em chave-valor (ex: {'itemtype': 'Computer'} para item; {'is_multiple_dropdown': 1} para dropdown). Sobrepoe options."},
                         "is_multiple_dropdown": {"type": "boolean", "description": "Permite multiplas escolhas em pergunta dropdown (default false)."},
-                        "conditions": {"type": "array", "description": "Condicoes de visibilidade (avançado). Formato ConditionData do GLPI: lista de dicts com item_uuid, item_type, value_operator, value, logic_operator.", "items": {"type": "object"}},
+                        "conditions": {"type": "array", "description": "Condicoes de visibilidade (avancado). Lista de dicts com item_uuid (UUID da pergunta-gatilho — veja em get_form/get_question), item_type (FQCN da pergunta-gatilho), value_operator (ex: equals, not_equals, contains), value (valor esperado), logic_operator. O GLPI usa o UUID, nao o ID, para referenciar a pergunta.", "items": {"type": "object"}},
                         "validation_conditions": {"type": "array", "description": "Condicoes de validacao (obrigatoriedade condicional). Mesmo formato de conditions.", "items": {"type": "object"}},
+                        "config": {"type": "object", "description": "Configuracao do destino (aba Chamado) em chave-valor bruto, mesclada sobre a configuracao atual (somente update_destination)."},
+                        "urgency_question_id": {"type": "integer", "description": "ID da pergunta (ex: Criticidade) cuja resposta define a Urgencia do chamado no destino (somente update_destination). Equivale a 'Resposta da pergunta' na aba Chamado."},
+                        "urgency_strategy": {"type": "string", "description": "Estrategia da Urgencia do destino (somente update_destination). Padrao: specific_answer (usa a resposta da pergunta urgency_question_id).", "enum": ["specific_answer", "from_template", "specific_value", "last_valid_answer"]},
                         "init_sections": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente a primeira secao (default true).", "default": True},
                         "init_destinations": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente o destino de ticket (default true).", "default": True},
                         "init_access_policies": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente a politica de acesso padrao (default true).", "default": True},
