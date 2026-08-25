@@ -690,6 +690,8 @@ class FormService:
             payload["description"] = description
         if rank is not None:
             payload["rank"] = int(rank)
+        # visibility_strategy obrigatoria: sem ela a secao nao renderiza.
+        payload["visibility_strategy"] = "always_visible"
         result = await glpi_client.post(f"/apirest.php/{SECTION_ENC}", payload)
         if not isinstance(result, dict) or "id" not in result:
             raise GLPIError(500, "Secao criada sem ID retornado pelo GLPI")
@@ -704,6 +706,11 @@ class FormService:
             payload["description"] = fields["description"]
         if fields.get("rank") is not None:
             payload["rank"] = int(fields["rank"])
+        # Garante visibility_strategy na secao ao atualizar.
+        visibility = fields.get("visibility_strategy")
+        if visibility in (None, ""):
+            visibility = "always_visible"
+        payload["visibility_strategy"] = visibility
         if not payload:
             raise ValidationError("Nenhum campo atualizavel fornecido para a secao", "payload")
         await glpi_client.put(f"/apirest.php/{SECTION_ENC}/{section_id}", payload)
@@ -720,6 +727,23 @@ class FormService:
     # ======================================================================
     # PERGUNTAS
     # ======================================================================
+
+    async def _next_question_rank(self, section_id: int) -> int:
+        """Retorna o proximo vertical_rank disponivel na secao."""
+        try:
+            questions = await glpi_client.get(
+                f"/apirest.php/{SECTION_ENC}/{section_id}/{QUESTION_ENC}",
+                params={"range": "0-499"},
+                use_cache=False,
+            )
+        except Exception:  # noqa: BLE001
+            return 0
+        ranks = [
+            int(q.get("vertical_rank") or 0)
+            for q in (questions if isinstance(questions, list) else [])
+            if isinstance(q, dict)
+        ]
+        return (max(ranks) + 1) if ranks else 1
 
     async def create_question(
         self,
@@ -740,6 +764,9 @@ class FormService:
         section_id = _require_id(section_id, "section_id")
         if not name or len(str(name).strip()) < 2:
             raise ValidationError("O nome da pergunta deve ter pelo menos 2 caracteres", "name")
+        # Se nao informado, calcula o proximo vertical_rank na secao.
+        if vertical_rank is None:
+            vertical_rank = await self._next_question_rank(section_id)
         payload = self._question_payload(
             section_id=section_id,
             name=name,
@@ -806,6 +833,14 @@ class FormService:
         type_value = fields.get("type")
         if type_value is not None:
             payload["type"] = resolve_question_type(type_value)
+
+        # visibility_strategy: obrigatorio para o plugin renderizar a pergunta.
+        # Com condicoes de visibilidade => visible_if; senao always_visible.
+        has_conditions = bool(fields.get("conditions"))
+        visibility = fields.get("visibility_strategy")
+        if visibility in (None, ""):
+            visibility = "visible_if" if has_conditions else "always_visible"
+        payload["visibility_strategy"] = visibility
 
         if fields.get("vertical_rank") is not None:
             payload["vertical_rank"] = int(fields["vertical_rank"])
