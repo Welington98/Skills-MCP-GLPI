@@ -59,6 +59,7 @@ QUESTION_ITEMTYPE = "Glpi\\Form\\Question"
 COMMENT_ITEMTYPE = "Glpi\\Form\\Comment"
 CATEGORY_ITEMTYPE = "Glpi\\Form\\Category"
 DESTINATION_ITEMTYPE = "Glpi\\Form\\Destination\\FormDestination"
+TRANSLATION_ITEMTYPE = "Glpi\\Form\\FormTranslation"
 
 #: Chave (slug do FQCN) usada no config JSON do destino para o campo Urgencia.
 #: GLPI serializa cada configurable field sob ``Toolbox::slugify(FQCN)`` — ver
@@ -72,6 +73,102 @@ URGENCY_FIELD_STRATEGIES = {
     "specific_answer": "specific_answer",
     "last_valid_answer": "last_valid_answer",
 }
+
+#: Nome amigavel do item pai -> FQCN usado no registro de traducao.
+TRANSLATION_ITEMTYPE_MAP = {
+    "form": FORM_ITEMTYPE,
+    "section": SECTION_ITEMTYPE,
+    "question": QUESTION_ITEMTYPE,
+    "comment": COMMENT_ITEMTYPE,
+    "Glpi\\Form\\Form": FORM_ITEMTYPE,
+    "Glpi\\Form\\Section": SECTION_ITEMTYPE,
+    "Glpi\\Form\\Question": QUESTION_ITEMTYPE,
+    "Glpi\\Form\\Comment": COMMENT_ITEMTYPE,
+}
+
+#: Chave amigavel -> chave GLPI da traducao por item pai.
+#: O GLPI so aplica a traducao quando a chave bate com a do handler
+#: (Form::TRANSLATION_KEY_* / Section:: / Question:: / Comment::).
+_TRANSLATION_KEYS = {
+    "form": {
+        "name": "form_name",
+        "title": "form_name",
+        "header": "form_header",
+        "description": "form_description",
+        "descricao": "form_description",
+    },
+    "section": {
+        "name": "section_name",
+        "title": "section_name",
+        "description": "section_description",
+        "descricao": "section_description",
+    },
+    "question": {
+        "name": "question_name",
+        "title": "question_name",
+        "description": "question_description",
+        "descricao": "question_description",
+        "default_value": "question_default_value",
+        "valor_padrao": "question_default_value",
+    },
+    "comment": {
+        "name": "comment_name",
+        "title": "comment_name",
+        "description": "comment_description",
+        "descricao": "comment_description",
+    },
+}
+
+#: Idioma do catalogo: code -> nome exibivel (amostra dos instalados no GLPI).
+TRANSLATION_LANGUAGE_HINTS = {
+    "en_US": "English (US)",
+    "en_GB": "English (UK)",
+    "es_ES": "Spanish",
+    "fr_FR": "French",
+    "pt_BR": "Portuguese (Brazil)",
+    "ar_SA": "Arabic",
+    "de_DE": "German",
+    "it_IT": "Italian",
+    "ja_JP": "Japanese",
+    "zh_CN": "Chinese",
+}
+
+
+def resolve_translation_itemtype(value: Any) -> str:
+    """Map a friendly parent name (form/section/question/comment) to its FQCN."""
+    if value is None:
+        raise ValidationError(
+            "itemtype e obrigatorio para traducao: form, section, question ou comment",
+            "itemtype",
+        )
+    text = str(value).strip()
+    itemtype = TRANSLATION_ITEMTYPE_MAP.get(text)
+    if itemtype is None:
+        raise ValidationError(
+            f"itemtype '{value}' desconhecido. Valores aceitos: "
+            "form, section, question, comment (ou o FQCN do Glpi\\Form\\*).",
+            "itemtype",
+        )
+    return itemtype
+
+
+def resolve_translation_key(itemtype: str, key: Any) -> str:
+    """Resolve a friendly translation key to the GLPI key for the given itemtype.
+
+    Also accepts the raw GLPI key (e.g. ``form_name``) unchanged.
+    """
+    if key is None:
+        raise ValidationError("key e obrigatorio para a traducao (ex: name)", "key")
+    # Normaliza o FQCN do item pai para o nome amigavel da tabela de chaves.
+    friendly = str(itemtype).strip()
+    for name, fqcn in TRANSLATION_ITEMTYPE_MAP.items():
+        if fqcn == friendly:
+            friendly = name
+            break
+    table = _TRANSLATION_KEYS.get(friendly, {})
+    text = str(key).strip().lower()
+    resolved = table.get(text, text)
+    return resolved
 
 _QUESTION_TYPE_NS = "Glpi\\Form\\QuestionType\\"
 
@@ -267,6 +364,7 @@ QUESTION_ENC = quote(QUESTION_ITEMTYPE, safe="")
 COMMENT_ENC = quote(COMMENT_ITEMTYPE, safe="")
 CATEGORY_ENC = quote(CATEGORY_ITEMTYPE, safe="")
 DESTINATION_ENC = quote(DESTINATION_ITEMTYPE, safe="")
+TRANSLATION_ENC = quote(TRANSLATION_ITEMTYPE, safe="")
 
 _form_field_sync_done = False
 _form_field_sync_lock = asyncio.Lock()
@@ -869,6 +967,14 @@ class FormService:
             payload["validation_conditions"] = json.dumps(
                 fields["validation_conditions"], ensure_ascii=False
             )
+
+        # validation_strategy: obrigatorio para o plugin renderizar a pergunta.
+        has_validation = bool(fields.get("validation_conditions"))
+        vstrategy = fields.get("validation_strategy")
+        if vstrategy in (None, ""):
+            vstrategy = "specific_validation" if has_validation else "no_validation"
+        payload["validation_strategy"] = vstrategy
+
         return payload
 
     # ======================================================================
@@ -1141,6 +1247,165 @@ class FormService:
             decoded = {}
         item["config"] = decoded
         return item
+
+    # ======================================================================
+    # TRADUCOES (i18n) — tabela glpi_translations via Glpi\Form\FormTranslation
+    # ======================================================================
+
+    @staticmethod
+    def _decode_translation_value(raw: str) -> str:
+        """Extract the human value from the translations JSON (CLDR plural map)."""
+        if not raw:
+            return ""
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return raw
+        if not isinstance(data, dict):
+            return raw
+        # "one" e a forma singular padrao; senão, primeiro valor nao vazio.
+        for key in ("one", "other", "few", "many"):
+            value = data.get(key)
+            if value:
+                return value
+        return str(data)
+
+    async def list_translations(
+        self,
+        itemtype: Optional[str] = None,
+        items_id: Optional[int] = None,
+        language: Optional[str] = None,
+        form_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """List translations, optionally filtered by parent, language or a form tree.
+
+        When ``form_id`` is given, all translations of the form and its
+        sections/questions/comments are returned.
+        """
+        # O endpoint de listagem pagina em blocos de 1000; a instancia costuma
+        # ter milhares de registros (migracao do Formcreator), entao percorre
+        # ate a ultima pagina antes de filtrar em memoria.
+        translations: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            try:
+                page = await glpi_client.get(
+                    f"/apirest.php/{TRANSLATION_ENC}",
+                    params={"range": f"{offset}-{offset + 999}"},
+                    use_cache=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _raise_form_endpoint_error(exc)
+                raise
+            page_rows = [t for t in (page if isinstance(page, list) else []) if isinstance(t, dict)]
+            translations.extend(page_rows)
+            if len(page_rows) < 1000:
+                break
+            offset += 1000
+
+        if form_id is not None:
+            form_id = _require_id(form_id, "form_id")
+            form = await self.get_form(form_id)
+            child_ids = {
+                SECTION_ITEMTYPE: [int(s["id"]) for s in form.get("sections", [])],
+                QUESTION_ITEMTYPE: [
+                    int(q["id"])
+                    for s in form.get("sections", [])
+                    for q in s.get("questions", [])
+                ],
+                COMMENT_ITEMTYPE: [
+                    int(c["id"])
+                    for s in form.get("sections", [])
+                    for c in s.get("comments", [])
+                ],
+            }
+            allowed = {FORM_ITEMTYPE: {form_id}, **child_ids}
+            translations = [
+                t for t in translations
+                if t.get("itemtype") in allowed
+                and t.get("items_id") in allowed.get(t.get("itemtype"), set())
+            ]
+
+        if itemtype is not None:
+            resolved = resolve_translation_itemtype(itemtype)
+            translations = [t for t in translations if t.get("itemtype") == resolved]
+        if items_id is not None:
+            items_id = _require_id(items_id, "items_id")
+            translations = [t for t in translations if int(t.get("items_id") or 0) == items_id]
+        if language is not None:
+            translations = [
+                t for t in translations if (t.get("language") or "") == str(language).strip()
+            ]
+
+        for t in translations:
+            t["translation"] = self._decode_translation_value(t.get("translations") or "")
+            if isinstance(t.get("translations"), str):
+                try:
+                    t["translations_data"] = json.loads(t["translations"])
+                except (TypeError, ValueError):
+                    t["translations_data"] = {}
+        return translations
+
+    async def create_translation(
+        self,
+        itemtype: str,
+        items_id: int,
+        language: str,
+        key: str,
+        value: str,
+    ) -> Dict[str, Any]:
+        """Create a translation record for a form/section/question/comment field."""
+        resolved_itemtype = resolve_translation_itemtype(itemtype)
+        resolved_key = resolve_translation_key(resolved_itemtype, key)
+        items_id = _require_id(items_id, "items_id")
+        language = str(language or "").strip()
+        if not language:
+            raise ValidationError("language e obrigatoria (ex: en_US, es_ES)", "language")
+        if value is None or str(value).strip() == "":
+            raise ValidationError("value e obrigatorio para a traducao", "value")
+
+        payload = {
+            "itemtype": resolved_itemtype,
+            "items_id": items_id,
+            "language": language,
+            "key": resolved_key,
+            "translations": {"one": str(value)},
+        }
+        try:
+            result = await glpi_client.post(f"/apirest.php/{TRANSLATION_ENC}", payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"create_translation failed: {exc}")
+            _raise_form_endpoint_error(exc)
+            raise
+        if not isinstance(result, dict) or "id" not in result:
+            raise GLPIError(500, "Traducao criada sem ID retornado pelo GLPI")
+        return await self.get_translation(int(result["id"]))
+
+    async def get_translation(self, translation_id: int) -> Dict[str, Any]:
+        translation_id = _require_id(translation_id, "translation_id")
+        item = await glpi_client.get(
+            f"/apirest.php/{TRANSLATION_ENC}/{translation_id}", use_cache=False
+        )
+        if not isinstance(item, dict) or "id" not in item:
+            raise NotFoundError(TRANSLATION_ITEMTYPE, translation_id)
+        item["translation"] = self._decode_translation_value(item.get("translations") or "")
+        return item
+
+    async def update_translation(self, translation_id: int, value: str) -> Dict[str, Any]:
+        translation_id = _require_id(translation_id, "translation_id")
+        if value is None or str(value).strip() == "":
+            raise ValidationError("value e obrigatorio para atualizar a traducao", "value")
+        payload = {"translations": {"one": str(value)}}
+        await glpi_client.put(f"/apirest.php/{TRANSLATION_ENC}/{translation_id}", payload)
+        return await self.get_translation(translation_id)
+
+    async def delete_translation(self, translation_id: int, purge: bool = True) -> Dict[str, Any]:
+        translation_id = _require_id(translation_id, "translation_id")
+        endpoint = f"/apirest.php/{TRANSLATION_ENC}/{translation_id}"
+        if purge:
+            endpoint += "?force_purge=true"
+        await glpi_client.delete(endpoint)
+        return {"id": translation_id, "purged": purge}
 
 
 # Instancia global do servico de formularios

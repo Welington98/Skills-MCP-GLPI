@@ -32,9 +32,12 @@ from src.models.exceptions import GLPIError, NotFoundError, ValidationError
 from src.services.form_service import (
     DESTINATION_URGENCY_FIELD_KEY,
     RENDER_LAYOUT_LABELS,
+    TRANSLATION_LANGUAGE_HINTS,
     form_service,
     resolve_question_type,
     resolve_render_layout,
+    resolve_translation_itemtype,
+    resolve_translation_key,
 )
 from src.utils.helpers import (
     PaginationHelper,
@@ -60,6 +63,9 @@ MANAGE_ACTIONS = [
     "get_category", "create_category", "update_category", "delete_category",
     # destinations (aba "Chamado")
     "list_destinations", "get_destination", "update_destination",
+    # translations (i18n)
+    "list_translations", "get_translation", "create_translation",
+    "update_translation", "delete_translation",
 ]
 
 ACTIONS_REQUIRING_FORM_ID = [
@@ -73,6 +79,7 @@ _DELETE_GUARD = {
     "delete_question": ("delete_form_question", "Question"),
     "delete_comment": ("delete_form_comment", "Comment"),
     "delete_category": ("delete_form_category", "Category"),
+    "delete_translation": ("delete_form_translation", "Translation"),
 }
 
 
@@ -353,6 +360,28 @@ def _format_destination_detail(item: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _fmt_language(code: str) -> str:
+    code = str(code or "").strip()
+    if not code:
+        return "N/A"
+    return TRANSLATION_LANGUAGE_HINTS.get(code, code)
+
+
+def _format_translation_detail(item: Dict[str, Any]) -> str:
+    if not item:
+        return "Traducao nao encontrada."
+    lines = [
+        f"# Traducao {esc(item.get('id'))}",
+        "",
+        f"- **Idioma:** {esc(_fmt_language(item.get('language')))} (`{esc(item.get('language') or 'N/A')}`)",
+        f"- **Item:** `{esc(item.get('itemtype') or 'N/A')}` id {esc(item.get('items_id') or 'N/A')}",
+        f"- **Chave:** `{esc(item.get('key') or 'N/A')}`",
+        f"- **Valor:** {esc(truncate_field(item.get('translation') or item.get('translations'), 1000) or '—')}",
+        f"- **Hash (fonte):** `{esc(item.get('hash') or 'N/A')}`",
+    ]
+    return "\n".join(lines)
+
+
 def _format_mutation(action: str, result: Dict[str, Any]) -> str:
     resource_id = result.get("id")
     if action.startswith("delete"):
@@ -448,6 +477,7 @@ async def manage_forms(
     comment_id: Optional[int] = None,
     category_id: Optional[int] = None,
     destination_id: Optional[int] = None,
+    translation_id: Optional[int] = None,
     # form / section / question / comment / category content
     name: Optional[str] = None,
     description: Optional[str] = None,
@@ -475,6 +505,12 @@ async def manage_forms(
     config: Optional[Dict[str, Any]] = None,
     urgency_question_id: Optional[int] = None,
     urgency_strategy: Optional[str] = None,
+    # translation specifics (i18n)
+    itemtype: Optional[str] = None,
+    items_id: Optional[int] = None,
+    language: Optional[str] = None,
+    key: Optional[str] = None,
+    value: Optional[str] = None,
     # create-form defaults
     init_sections: bool = True,
     init_destinations: bool = True,
@@ -501,6 +537,8 @@ async def manage_forms(
         comment_id = _coerce_int(comment_id)
         category_id = _coerce_int(category_id)
         destination_id = _coerce_int(destination_id)
+        translation_id = _coerce_int(translation_id)
+        items_id = _coerce_int(items_id)
         rank = _coerce_int(rank)
         vertical_rank = _coerce_int(vertical_rank)
         horizontal_rank = _coerce_int(horizontal_rank)
@@ -537,6 +575,7 @@ async def manage_forms(
                 "delete_question": question_id,
                 "delete_comment": comment_id,
                 "delete_category": category_id,
+                "delete_translation": translation_id,
             }[action]
             require_safety_confirmation(
                 op,
@@ -796,6 +835,71 @@ async def manage_forms(
                 urgency_strategy=urgency_strategy,
             )
             return _format_destination_detail(item)
+
+        # ---- translation writes (i18n) -----------------------------------
+        if action == "list_translations":
+            translations = await form_service.list_translations(
+                itemtype=itemtype,
+                items_id=items_id,
+                language=language,
+                form_id=form_id,
+            )
+            if not translations:
+                return "Nenhuma traducao encontrada para o filtro informado."
+            lines = [
+                f"**{len(translations)} traducao(oes)** — use `get_translation` para detalhe:"
+            ]
+            for index, t in enumerate(translations, start=1):
+                parent = (t.get("itemtype") or "").rsplit("\\", 1)[-1]
+                lines.append(
+                    f"{index}. `{t.get('language')}` | {parent} #{t.get('items_id')} | "
+                    f"`{t.get('key')}` = {esc(truncate_field(t.get('translation'), 80) or '—')}"
+                )
+            return "\n".join(lines)
+
+        if action == "get_translation":
+            item = await form_service.get_translation(
+                _require_id(translation_id, "translation_id")
+            )
+            return _format_translation_detail(item)
+
+        if action == "create_translation":
+            if not value:
+                return create_mcp_error(
+                    "'value' e obrigatorio para criar uma traducao",
+                    "Forneca o texto traduzido",
+                    "Exemplo: glpi_manage_forms(action='create_translation', "
+                    "itemtype='form', items_id=24, language='en_US', key='name', "
+                    "value='Publish application')",
+                )
+            item = await form_service.create_translation(
+                itemtype=itemtype,
+                items_id=items_id,
+                language=language,
+                key=key,
+                value=value,
+            )
+            return _format_translation_detail(item)
+
+        if action == "update_translation":
+            if not value:
+                return create_mcp_error(
+                    "'value' e obrigatorio para atualizar a traducao",
+                    "Forneca o texto traduzido",
+                    "Exemplo: glpi_manage_forms(action='update_translation', "
+                    "translation_id=1494, value='Publish application')",
+                )
+            item = await form_service.update_translation(
+                _require_id(translation_id, "translation_id"),
+                value=value,
+            )
+            return _format_translation_detail(item)
+
+        if action == "delete_translation":
+            result = await form_service.delete_translation(
+                _require_id(translation_id, "translation_id"), purge=purge
+            )
+            return _format_mutation(action, result)
 
         return create_mcp_error(
             f"Acao '{action}' nao tratada",

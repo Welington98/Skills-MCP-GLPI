@@ -975,6 +975,12 @@ Operações sobre **um** formulário, secão, pergunta, comentário ou categoria
 | `urgency_question_id` | integer | update_destination | ID da pergunta cuja resposta define a **Urgência** do chamado (ex: Criticidade) — equivale a "Resposta da pergunta" na aba Chamado |
 | `urgency_strategy` | string | update_destination | Estratégia da Urgência: `specific_answer` (padrão), `from_template`, `specific_value`, `last_valid_answer` |
 | `config` | object | update_destination | Config do destino em chave-valor bruto (mesclada sobre a atual) |
+| `translation_id` | integer | get/update/delete_translation | ID do registro de tradução |
+| `itemtype` | string | create/list_translations | Item pai da tradução: `form`, `section`, `question`, `comment` |
+| `items_id` | integer | create/list_translations | ID do item pai da tradução |
+| `language` | string | create/list_translations | Código do idioma GLPI (ex: `en_US`, `es_ES`, `fr_FR`, `ar_SA`) |
+| `key` | string | create_translation | Campo a traduzir: `name`, `description`, `header` (form); `name`, `description` (seção/comentário); `name`, `description`, `default_value` (pergunta). Aceita a chave GLPI crua (`form_name`, etc.) |
+| `value` | string | create/update_translation | Texto traduzido |
 | `init_sections` / `init_destinations` / `init_access_policies` | boolean | Não | Desativa o auto-bootstrap no create do formulário |
 | `purge` | boolean | Não | `true` (padrão) exclui definitivamente |
 | `confirmation_token` / `reason` | — | delete | Confirmam exclusão quando o safety guard está ativo |
@@ -1001,6 +1007,11 @@ Operações sobre **um** formulário, secão, pergunta, comentário ou categoria
 | `list_destinations` | `form_id` | Lista os destinos (aba Chamado) do formulário |
 | `get_destination` | `destination_id` | Detalhe do destino com a configuração de campos do ticket |
 | `update_destination` | `destination_id` | Altera o destino (nome e/ou config); ex: `urgency_question_id` mapeia a Urgência do chamado para a resposta da pergunta |
+| `list_translations` | `form_id` **ou** `itemtype`+`items_id` | Lista as traduções (i18n) de um form (e seções/perguntas/comentários) ou de um item específico |
+| `get_translation` | `translation_id` | Detalhe de um registro de tradução |
+| `create_translation` | `itemtype`, `items_id`, `language`, `key`, `value` | Adiciona uma tradução (ex: `en_US` do título do form) |
+| `update_translation` | `translation_id`, `value` | Altera o texto traduzido |
+| `delete_translation` | `translation_id` | Exclui a tradução (safety guard) |
 
 **Tipos de pergunta (`type`)**: `text`, `email`, `number`, `long_answer`,
 `date`, `radio`, `checkbox`, `dropdown`, `item` (objeto GLPI),

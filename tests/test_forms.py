@@ -36,8 +36,11 @@ from src.services.form_service import (
     DESTINATION_URGENCY_FIELD_KEY,
     FORM_ENC,
     QUESTION_ENC,
+    TRANSLATION_ENC,
     resolve_question_type,
     resolve_render_layout,
+    resolve_translation_itemtype,
+    resolve_translation_key,
     form_service,
     reset_field_sync,
 )
@@ -113,6 +116,32 @@ class TestResolveRenderLayout:
     def test_boolean_is_refused(self) -> None:
         with pytest.raises(ValidationError):
             resolve_render_layout(True)
+
+
+class TestResolveTranslation:
+    def test_friendly_itemtype_maps_to_fqcn(self) -> None:
+        assert resolve_translation_itemtype("form") == "Glpi\\Form\\Form"
+        assert resolve_translation_itemtype("section") == "Glpi\\Form\\Section"
+        assert resolve_translation_itemtype("question") == "Glpi\\Form\\Question"
+        assert resolve_translation_itemtype("comment") == "Glpi\\Form\\Comment"
+
+    def test_unknown_itemtype_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            resolve_translation_itemtype("category")
+
+    def test_friendly_key_maps_per_itemtype(self) -> None:
+        assert resolve_translation_key("Glpi\\Form\\Form", "name") == "form_name"
+        assert resolve_translation_key("Glpi\\Form\\Form", "header") == "form_header"
+        assert resolve_translation_key("Glpi\\Form\\Section", "name") == "section_name"
+        assert resolve_translation_key("Glpi\\Form\\Question", "default_value") == "question_default_value"
+        assert resolve_translation_key("Glpi\\Form\\Comment", "description") == "comment_description"
+
+    def test_raw_glpi_key_passes_through(self) -> None:
+        assert resolve_translation_key("Glpi\\Form\\Form", "form_name") == "form_name"
+
+    def test_missing_key_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            resolve_translation_key("Glpi\\Form\\Form", None)
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +299,10 @@ class TestFormServiceEndpoints:
             new=AsyncMock(return_value={"id": 9, "name": "Contexto"}),
         ):
             await form_service.update_question(9, is_mandatory=True)
-        assert put.await_args.args[1] == {"is_mandatory": 1}
+        sent = put.await_args.args[1]
+        assert sent["is_mandatory"] == 1
+        # visibility_strategy e obrigatoria para o GLPI renderizar a pergunta.
+        assert sent["visibility_strategy"] == "always_visible"
 
     async def test_question_payload_omits_unset_is_mandatory(self) -> None:
         with patch(
@@ -360,6 +392,76 @@ class TestFormServiceEndpoints:
         sent = put.await_args.args[1]["config"]
         assert existing_key in sent  # config preexistente preservada
         assert DESTINATION_URGENCY_FIELD_KEY in sent
+
+    async def test_create_translation_posts_resolved_key(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.post",
+            new=AsyncMock(return_value={"id": 1494}),
+        ) as post, patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={
+                "id": 1494, "itemtype": "Glpi\\Form\\Form", "items_id": 24,
+                "language": "en_US", "key": "form_name", "translations": "{\"one\":\"X\"}",
+            }),
+        ):
+            item = await form_service.create_translation(
+                itemtype="form", items_id=24, language="en_US", key="name", value="Publish app"
+            )
+
+        payload = post.await_args.args[1]
+        assert payload["itemtype"] == "Glpi\\Form\\Form"
+        assert payload["key"] == "form_name"
+        assert payload["translations"] == {"one": "Publish app"}
+        assert item["translation"] == "X"
+
+    async def test_list_translations_filters_by_form_tree(self) -> None:
+        form_payload = {
+            "id": 24, "name": "Form",
+            "sections": [{
+                "id": 25, "name": "S1", "questions": [{"id": 118, "name": "Q1"}],
+                "comments": [],
+            }],
+        }
+        translations = [
+            {"id": 1, "itemtype": "Glpi\\Form\\Form", "items_id": 24, "language": "en_US",
+             "key": "form_name", "translations": "{\"one\":\"F\"}"},
+            {"id": 2, "itemtype": "Glpi\\Form\\Section", "items_id": 25, "language": "en_US",
+             "key": "section_name", "translations": "{\"one\":\"S\"}"},
+            {"id": 3, "itemtype": "Glpi\\Form\\Question", "items_id": 118, "language": "en_US",
+             "key": "question_name", "translations": "{\"one\":\"Q\"}"},
+            {"id": 4, "itemtype": "Glpi\\Form\\Form", "items_id": 99, "language": "en_US",
+             "key": "form_name", "translations": "{\"one\":\"Outro\"}"},
+        ]
+        with patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value=translations),
+        ), patch.object(form_service, "get_form", new=AsyncMock(return_value=form_payload)):
+            rows = await form_service.list_translations(form_id=24)
+        ids = [t["id"] for t in rows]
+        assert ids == [1, 2, 3]  # traducoes fora da arvore do form 24 sao excluidas
+
+    async def test_update_translation_posts_value(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.put",
+            new=AsyncMock(return_value={}),
+        ) as put, patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={
+                "id": 1494, "itemtype": "Glpi\\Form\\Form", "items_id": 24,
+                "language": "en_US", "key": "form_name", "translations": "{\"one\":\"v2\"}",
+            }),
+        ):
+            item = await form_service.update_translation(1494, value="v2")
+        assert put.await_args.args[1] == {"translations": {"one": "v2"}}
+        assert item["translation"] == "v2"
+
+    async def test_delete_translation_targets_encoded_itemtype(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.delete",
+            new=AsyncMock(return_value={}),
+        ) as delete:
+            await form_service.delete_translation(1494)
+        delete.assert_awaited_once_with(f"/apirest.php/{TRANSLATION_ENC}/1494?force_purge=true")
 
     async def test_get_form_embeds_sections(self) -> None:
         sections = [{"id": 3, "name": "S1"}, {"id": 4, "name": "S2"}]
@@ -520,6 +622,49 @@ class TestManageFormsTool:
         assert kwargs["urgency_question_id"] == 122
         assert "122" in text  # renderiza a pergunta da urgencia
 
+    async def test_create_translation_requires_value(self) -> None:
+        result = await manage_forms(
+            action="create_translation", itemtype="form", items_id=24,
+            language="en_US", key="name",
+        )
+        assert "value" in str(result)
+
+    async def test_create_translation_forwards_params(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.form_service.create_translation",
+            new=AsyncMock(return_value={
+                "id": 1494, "itemtype": "Glpi\\Form\\Form", "items_id": 24,
+                "language": "en_US", "key": "form_name", "translation": "Publish app",
+            }),
+        ) as create:
+            text = await manage_forms(
+                action="create_translation", itemtype="form", items_id=24,
+                language="en_US", key="name", value="Publish app",
+            )
+        kwargs = create.await_args.kwargs
+        assert kwargs["items_id"] == 24
+        assert kwargs["value"] == "Publish app"
+        assert "Publish app" in text
+
+    async def test_update_translation_requires_value(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.form_service.update_translation",
+            new=AsyncMock(return_value={"id": 1494}),
+        ):
+            result = await manage_forms(action="update_translation", translation_id=1494)
+        assert "value" in str(result)
+
+    async def test_delete_translation_runs_through_safety_guard(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.require_safety_confirmation"
+        ) as guard, patch(
+            "src.tools.consolidated_forms.form_service.delete_translation",
+            new=AsyncMock(return_value={"id": 1494, "purged": True}),
+        ):
+            await manage_forms(action="delete_translation", translation_id=1494)
+        guard.assert_called_once()
+        assert guard.call_args.args[0] == "delete_form_translation"
+
     async def test_create_question_requires_type(self) -> None:
         result = await manage_forms(action="create_question", section_id=1, name="X")
         assert "obrigatorios" in str(result)
@@ -539,7 +684,7 @@ class TestManageFormsTool:
     async def test_guard_protected_operations_include_forms(self) -> None:
         protected = safety_guard.PROTECTED_OPERATIONS
         for op in ("delete_form", "delete_form_section", "delete_form_question",
-                   "delete_form_comment", "delete_form_category"):
+                   "delete_form_comment", "delete_form_category", "delete_form_translation"):
             assert op in protected
 
     def test_mutation_message_handles_delete_suffix(self) -> None:
@@ -561,6 +706,9 @@ class TestWritePolicyWiring:
         assert resolve_operation("forms", "delete_question") is WriteOperation.FORM_QUESTION_DELETE
         assert resolve_operation("forms", "create_category") is WriteOperation.FORM_CATEGORY_CREATE
         assert resolve_operation("forms", "delete_category") is WriteOperation.FORM_CATEGORY_DELETE
+        assert resolve_operation("forms", "create_translation") is WriteOperation.FORM_TRANSLATION_CREATE
+        assert resolve_operation("forms", "update_translation") is WriteOperation.FORM_TRANSLATION_UPDATE
+        assert resolve_operation("forms", "delete_translation") is WriteOperation.FORM_TRANSLATION_DELETE
 
     def test_form_read_actions_are_not_writes(self) -> None:
         assert resolve_operation("forms", "get") is None
@@ -570,7 +718,7 @@ class TestWritePolicyWiring:
         from src.security.write_policy import WRITE_OPERATIONS
         for op in (WriteOperation.FORM_DELETE, WriteOperation.FORM_SECTION_DELETE,
                    WriteOperation.FORM_QUESTION_DELETE, WriteOperation.FORM_COMMENT_DELETE,
-                   WriteOperation.FORM_CATEGORY_DELETE):
+                   WriteOperation.FORM_CATEGORY_DELETE, WriteOperation.FORM_TRANSLATION_DELETE):
             assert WRITE_OPERATIONS[op].default_enabled is False
             assert WRITE_OPERATIONS[op].destructive is True
 
@@ -580,4 +728,8 @@ class TestWritePolicyWiring:
         assert (
             WRITE_OPERATIONS[WriteOperation.FORM_QUESTION_DELETE].safety_guard_operation
             == "delete_form_question"
+        )
+        assert (
+            WRITE_OPERATIONS[WriteOperation.FORM_TRANSLATION_DELETE].safety_guard_operation
+            == "delete_form_translation"
         )

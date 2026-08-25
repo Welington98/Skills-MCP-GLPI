@@ -616,19 +616,19 @@ class MCPHandler:
                 "name": "glpi_manage_forms",  # 17 chars
                 "description": (
                     "Formularios nativos do GLPI 11 e catalogo de servicos — operacoes sobre formulario, secao, pergunta, "
-                    "comentario, categoria ou destino (aba Chamado; ex. mapear Urgencia para resposta da pergunta Criticidade). "
+                    "comentario, categoria, destino (aba Chamado) e traducao (i18n). "
                     "Actions: get/create/update/delete; list_sections, create_section, update_section, "
                     "delete_section; create_question, update_question, delete_question; create_comment, update_comment, "
                     "delete_comment; create_category, update_category, delete_category; list_destinations, "
-                    "get_destination, update_destination. Acione para montar o catalogo de servicos "
-                    "sem usar a UI. Para LISTAR use glpi_search_forms. Exclusao e destrutiva e pode "
-                    "exigir confirmacao. Retorna Markdown."
+                    "get_destination, update_destination; list_translations, get_translation, create_translation, "
+                    "update_translation, delete_translation. Acione para montar o catalogo de servicos "
+                    "sem usar a UI. Para LISTAR use glpi_search_forms. Exclusao e destrutiva. Retorna Markdown."
                 ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string", "description": "Operacao a executar no GLPI. Formulario: get, create, update, delete. Secoes: list_sections, create_section, update_section, delete_section. Perguntas: create_question, update_question, delete_question. Comentarios: create_comment, update_comment, delete_comment. Categorias do catalogo: create_category, update_category, delete_category. Destinos do chamado: list_destinations, get_destination, update_destination.", "enum": ["get", "create", "update", "delete", "list_sections", "create_section", "update_section", "delete_section", "create_question", "update_question", "delete_question", "create_comment", "update_comment", "delete_comment", "create_category", "update_category", "delete_category", "list_destinations", "get_destination", "update_destination"]},
-                        "form_id": {"type": "integer", "description": "ID do formulario no GLPI (obrigatorio para get, update, delete, list_sections, create_section e list_destinations)."},
+                        "action": {"type": "string", "description": "Operacao a executar no GLPI. Formulario: get, create, update, delete. Secoes: list_sections, create_section, update_section, delete_section. Perguntas: create_question, update_question, delete_question. Comentarios: create_comment, update_comment, delete_comment. Categorias do catalogo: create_category, update_category, delete_category. Destinos do chamado: list_destinations, get_destination, update_destination. Traducoes (i18n): list_translations, get_translation, create_translation, update_translation, delete_translation.", "enum": ["get", "create", "update", "delete", "list_sections", "create_section", "update_section", "delete_section", "create_question", "update_question", "delete_question", "create_comment", "update_comment", "delete_comment", "create_category", "update_category", "delete_category", "list_destinations", "get_destination", "update_destination", "list_translations", "get_translation", "create_translation", "update_translation", "delete_translation"]},
+                        "form_id": {"type": "integer", "description": "ID do formulario no GLPI (obrigatorio para get, update, delete, list_sections, create_section, list_destinations; em list_translations, lista todas as traducoes do form e de suas secoes/perguntas/comentarios)."},
                         "section_id": {"type": "integer", "description": "ID da secao no GLPI (obrigatorio para create_question, create_comment e para actions de secao)."},
                         "question_id": {"type": "integer", "description": "ID da pergunta no GLPI (obrigatorio para update_question e delete_question)."},
                         "comment_id": {"type": "integer", "description": "ID do comentario no GLPI (obrigatorio para update_comment e delete_comment)."},
@@ -658,6 +658,12 @@ class MCPHandler:
                         "config": {"type": "object", "description": "Configuracao do destino (aba Chamado) em chave-valor bruto, mesclada sobre a configuracao atual (somente update_destination)."},
                         "urgency_question_id": {"type": "integer", "description": "ID da pergunta (ex: Criticidade) cuja resposta define a Urgencia do chamado no destino (somente update_destination). Equivale a 'Resposta da pergunta' na aba Chamado."},
                         "urgency_strategy": {"type": "string", "description": "Estrategia da Urgencia do destino (somente update_destination). Padrao: specific_answer (usa a resposta da pergunta urgency_question_id).", "enum": ["specific_answer", "from_template", "specific_value", "last_valid_answer"]},
+                        "translation_id": {"type": "integer", "description": "ID do registro de traducao no GLPI (obrigatorio para get_translation, update_translation e delete_translation)."},
+                        "itemtype": {"type": "string", "description": "Item pai da traducao: form, section, question ou comment (obrigatorio em create_translation; opcional em list_translations).", "enum": ["form", "section", "question", "comment"]},
+                        "items_id": {"type": "integer", "description": "ID do item pai da traducao (obrigatorio em create_translation; opcional em list_translations)."},
+                        "language": {"type": "string", "description": "Codigo do idioma GLPI (ex: en_US, es_ES, fr_FR, ar_SA, de_DE). Obrigatorio em create_translation; opcional em list_translations.", "default": "en_US"},
+                        "key": {"type": "string", "description": "Campo a traduzir (obrigatorio em create_translation): name, description, header (form); name, description (secao/comentario); name, description, default_value (pergunta). Aceita tambem a chave GLPI crua (form_name, section_name, question_name, etc)."},
+                        "value": {"type": "string", "description": "Texto traduzido (obrigatorio em create_translation e update_translation)."},
                         "init_sections": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente a primeira secao (default true).", "default": True},
                         "init_destinations": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente o destino de ticket (default true).", "default": True},
                         "init_access_policies": {"type": "boolean", "description": "Ao criar o formulario, cria automaticamente a politica de acesso padrao (default true).", "default": True},
@@ -1797,6 +1803,7 @@ class MCPHandler:
         "create", "add_followup", "add_task", "add_document",
         "link_tickets", "link_ticket", "request_validation", "create_reservation",
         "create_section", "create_question", "create_comment", "create_category",
+        "create_translation",
     })
 
     # Janela de proteção contra repetição. Curta de propósito: cobre o retry do

@@ -173,6 +173,9 @@ class WriteOperation(str, Enum):
     FORM_CATEGORY_CREATE = "form.category_create"
     FORM_CATEGORY_UPDATE = "form.category_update"
     FORM_CATEGORY_DELETE = "form.category.delete"
+    FORM_TRANSLATION_CREATE = "form.translation_create"
+    FORM_TRANSLATION_UPDATE = "form.translation_update"
+    FORM_TRANSLATION_DELETE = "form.translation.delete"
 
     def __str__(self) -> str:  # pragma: no cover - cosmetic
         return self.value
@@ -365,6 +368,14 @@ _SPECS: tuple[WriteOperationSpec, ...] = (
         default_enabled=False, destructive=True,
         safety_guard_operation="delete_form_category",
     ),
+    _spec(WriteOperation.FORM_TRANSLATION_CREATE, "Adicionar traducao de formulario"),
+    _spec(WriteOperation.FORM_TRANSLATION_UPDATE, "Alterar traducao de formulario"),
+    _spec(
+        WriteOperation.FORM_TRANSLATION_DELETE,
+        "Excluir traducao de formulario",
+        default_enabled=False, destructive=True,
+        safety_guard_operation="delete_form_translation",
+    ),
 )
 
 #: Single source of truth: operation -> spec (name of the env var included).
@@ -446,6 +457,9 @@ _TOOL_ACTION_MAP: Mapping[tuple[str, str], WriteOperation] = MappingProxyType(
         ("forms", "create_category"): WriteOperation.FORM_CATEGORY_CREATE,
         ("forms", "update_category"): WriteOperation.FORM_CATEGORY_UPDATE,
         ("forms", "delete_category"): WriteOperation.FORM_CATEGORY_DELETE,
+        ("forms", "create_translation"): WriteOperation.FORM_TRANSLATION_CREATE,
+        ("forms", "update_translation"): WriteOperation.FORM_TRANSLATION_UPDATE,
+        ("forms", "delete_translation"): WriteOperation.FORM_TRANSLATION_DELETE,
     }
 )
 

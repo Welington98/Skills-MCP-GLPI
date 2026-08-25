@@ -78,6 +78,7 @@ class SafetyGuard:
         "delete_form_question": "Deletar pergunta de formulario permanentemente",
         "delete_form_comment": "Deletar comentario de formulario permanentemente",
         "delete_form_category": "Deletar categoria do catalogo permanentemente",
+        "delete_form_translation": "Deletar traducao de formulario permanentemente",
     }
     
     MIN_TOKEN_LENGTH = 8
