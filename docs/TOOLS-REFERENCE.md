@@ -959,6 +959,7 @@ Operações sobre **um** formulário, secão, pergunta, comentário ou categoria
 | `name` | string | create | Título do formulário/seção/pergunta/categoria |
 | `description` | string | Não | Descrição (texto rico) |
 | `header` | string | Não | Cabeçalho do formulário |
+| `render_layout` | string | Não | Layout de exibição: `single_page` (página única) ou `step_by_step` (seção por seção, padrão) |
 | `is_active` / `is_pinned` / `is_draft` | boolean | Não | Flags do formulário |
 | `rank` | integer | Não | Ordem da seção |
 | `vertical_rank` / `horizontal_rank` | integer | Não | Posição do bloco na seção |

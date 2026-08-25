@@ -29,8 +29,10 @@ from src.formatters.markdown_helpers import (
 )
 from src.models.exceptions import GLPIError, NotFoundError, ValidationError
 from src.services.form_service import (
+    RENDER_LAYOUT_LABELS,
     form_service,
     resolve_question_type,
+    resolve_render_layout,
 )
 from src.utils.helpers import (
     PaginationHelper,
@@ -130,6 +132,13 @@ def _fmt_question_type(raw_type: Any) -> str:
     return short.replace("QuestionType", "")
 
 
+def _fmt_render_layout(raw_layout: Any) -> str:
+    text = str(raw_layout or "").strip().lower()
+    if not text:
+        return "N/A"
+    return RENDER_LAYOUT_LABELS.get(text, text)
+
+
 def _fmt_rows(scope: str, payload: Dict[str, Any], args: dict) -> str:
     items = payload.get("items") or []
     if not items:
@@ -184,6 +193,7 @@ def _format_form_detail(item: Dict[str, Any]) -> str:
         f"# Formulario {esc(item.get('id'))} — {esc(title)}",
         "",
         f"- **Categoria:** {esc(item.get('forms_categories_id') or item.get('category') or 'N/A')}",
+        f"- **Layout:** {esc(_fmt_render_layout(item.get('render_layout')))}",
         f"- **Ativo:** {_fmt_bool(item.get('is_active'))}",
         f"- **Fixado no topo:** {_fmt_bool(item.get('is_pinned'))}",
         f"- **Rascunho:** {_fmt_bool(item.get('is_draft'))}",
@@ -361,6 +371,7 @@ async def manage_forms(
     name: Optional[str] = None,
     description: Optional[str] = None,
     header: Optional[str] = None,
+    render_layout: Optional[str] = None,
     is_active: Optional[bool] = None,
     is_pinned: Optional[bool] = None,
     is_draft: Optional[bool] = None,
@@ -490,6 +501,7 @@ async def manage_forms(
                 name=name,
                 description=description,
                 header=header,
+                render_layout=resolve_render_layout(render_layout),
                 category_id=category_id,
                 entity_id=entity_id,
                 is_active=True if is_active is None else _coerce_bool(is_active),
@@ -507,6 +519,7 @@ async def manage_forms(
                 name=name,
                 description=description,
                 header=header,
+                render_layout=resolve_render_layout(render_layout),
                 category_id=category_id,
                 entity_id=entity_id,
                 is_active=None if is_active is None else _coerce_bool(is_active),

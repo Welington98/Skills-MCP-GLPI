@@ -117,6 +117,27 @@ _SELECTABLE_TYPES = {
     "QuestionTypeDropdown",
 }
 
+#: Valores aceitos pela coluna ``render_layout`` do Form (enum Glpi\Form\RenderLayout).
+#: Normalizados para o valor que o GLPI grava na API.
+RENDER_LAYOUTS = {
+    "single_page": "single_page",
+    "single-page": "single_page",
+    "singlepage": "single_page",
+    "pagina_unica": "single_page",
+    "pagina_única": "single_page",
+    "step_by_step": "step_by_step",
+    "step-by-step": "step_by_step",
+    "stepbystep": "step_by_step",
+    "por_secao": "step_by_step",
+    "por_seção": "step_by_step",
+    "sections": "step_by_step",
+}
+
+RENDER_LAYOUT_LABELS = {
+    "single_page": "pagina unica",
+    "step_by_step": "secao por secao (padrao)",
+}
+
 
 def resolve_question_type(value: Any) -> str:
     """Map a friendly question type name to its FQCN, or validate an FQCN.
@@ -153,6 +174,31 @@ def resolve_question_type(value: Any) -> str:
             "type",
         )
     return _QUESTION_TYPE_NS + cls
+
+
+def resolve_render_layout(value: Any) -> Optional[str]:
+    """Normalise a friendly form layout name to the value GLPI stores.
+
+    Returns ``None`` when the caller did not set the field (the GLPI default,
+    ``step_by_step``, then applies on create). Unknown values are refused so a
+    typo does not silently reach the API and get stored in the table.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValidationError(
+            "render_layout deve ser uma string: single_page ou step_by_step",
+            "render_layout",
+        )
+    text = str(value).strip().lower().replace(" ", "_")
+    layout = RENDER_LAYOUTS.get(text)
+    if layout is None:
+        raise ValidationError(
+            f"render_layout '{value}' desconhecido. Valores aceitos: "
+            "single_page (pagina unica) ou step_by_step (secao por secao).",
+            "render_layout",
+        )
+    return layout
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +530,7 @@ class FormService:
         name: str,
         description: Optional[str] = None,
         header: Optional[str] = None,
+        render_layout: Optional[str] = None,
         category_id: Optional[int] = None,
         entity_id: Optional[int] = None,
         is_active: bool = True,
@@ -502,11 +549,15 @@ class FormService:
         if not name or len(str(name).strip()) < 2:
             raise ValidationError("O nome do formulario deve ter pelo menos 2 caracteres", "name")
 
+        render_layout = resolve_render_layout(render_layout)
+
         payload: Dict[str, Any] = {"name": str(name).strip()}
         if description is not None:
             payload["description"] = description
         if header is not None:
             payload["header"] = header
+        if render_layout is not None:
+            payload["render_layout"] = render_layout
         if category_id is not None:
             payload["forms_categories_id"] = _require_id(category_id, "category_id")
         if entity_id is not None:
@@ -559,6 +610,7 @@ class FormService:
             "name": "name",
             "description": "description",
             "header": "header",
+            "render_layout": "render_layout",
             "category_id": "forms_categories_id",
             "entity_id": "entities_id",
         }
@@ -568,6 +620,8 @@ class FormService:
         for flag in ("is_active", "is_pinned", "is_draft"):
             if fields.get(flag) is not None:
                 payload[flag] = int(bool(fields[flag]))
+        if "render_layout" in payload:
+            payload["render_layout"] = resolve_render_layout(payload["render_layout"])
         return payload
 
     async def delete_form(self, form_id: int, purge: bool = True) -> Dict[str, Any]:

@@ -634,6 +634,7 @@ class MCPHandler:
                         "name": {"type": "string", "description": "Nome/titulo do formulario, secao, pergunta, comentario ou categoria (obrigatorio para create de formulario, secao, pergunta e categoria)."},
                         "description": {"type": "string", "description": "Descricao (texto rico do GLPI). Para o formulario, fica visivel no tile do catalogo."},
                         "header": {"type": "string", "description": "Cabecalho do formulario, exibido no topo (somente create/update de formulario)."},
+                        "render_layout": {"type": "string", "description": "Layout de exibicao do formulario no catalogo: single_page (todas as secoes em uma unica pagina) ou step_by_step (secao por secao, padrao). Somente create/update de formulario.", "enum": ["single_page", "step_by_step"]},
                         "is_active": {"type": "boolean", "description": "Formulario ativo (visivel no catalogo). Somente formulario."},
                         "is_pinned": {"type": "boolean", "description": "Fixar o formulario no topo do catalogo (sempre visivel). Somente formulario."},
                         "is_draft": {"type": "boolean", "description": "Marcar o formulario como rascunho. Somente formulario."},

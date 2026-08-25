@@ -33,6 +33,7 @@ from src.services.form_service import (
     FORM_ENC,
     QUESTION_ENC,
     resolve_question_type,
+    resolve_render_layout,
     form_service,
     reset_field_sync,
 )
@@ -87,6 +88,27 @@ class TestResolveQuestionType:
     def test_missing_type_is_refused(self) -> None:
         with pytest.raises(ValidationError):
             resolve_question_type(None)
+
+
+class TestResolveRenderLayout:
+    def test_single_page_is_kept(self) -> None:
+        assert resolve_render_layout("single_page") == "single_page"
+
+    def test_friendly_aliases_normalise(self) -> None:
+        assert resolve_render_layout("pagina unica") == "single_page"
+        assert resolve_render_layout("SINGLE-PAGE") == "single_page"
+        assert resolve_render_layout("step by step") == "step_by_step"
+
+    def test_unset_returns_none(self) -> None:
+        assert resolve_render_layout(None) is None
+
+    def test_unknown_layout_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            resolve_render_layout("carrossel")
+
+    def test_boolean_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            resolve_render_layout(True)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +189,38 @@ class TestFormServiceEndpoints:
         )
         get.assert_awaited()
         assert result["id"] == 42
+
+    async def test_create_form_posts_render_layout_when_single_page(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.post",
+            new=AsyncMock(return_value={"id": 42}),
+        ) as post, patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={"id": 42, "name": "Acesso VPN"}),
+        ):
+            await form_service.create_form(
+                name="Acesso VPN", render_layout="single_page"
+            )
+
+        payload = post.await_args.args[1]
+        assert payload["render_layout"] == "single_page"
+
+    async def test_update_form_posts_render_layout(self) -> None:
+        with patch(
+            "src.services.form_service.glpi_client.put",
+            new=AsyncMock(return_value={}),
+        ) as put, patch(
+            "src.services.form_service.glpi_client.get",
+            new=AsyncMock(return_value={"id": 24, "name": "Form"}),
+        ):
+            await form_service.update_form(24, render_layout="single_page")
+
+        put.assert_awaited_once()
+        assert put.await_args.args[1] == {"render_layout": "single_page"}
+
+    async def test_update_form_refuses_unknown_render_layout(self) -> None:
+        with pytest.raises(ValidationError):
+            await form_service.update_form(24, render_layout="carrossel")
 
     async def test_create_question_maps_type_and_options(self) -> None:
         with patch(
@@ -292,6 +346,32 @@ class TestManageFormsTool:
         assert kwargs["is_active"] is None
         assert kwargs["is_pinned"] is None
         assert kwargs["is_draft"] is None
+        assert kwargs["render_layout"] is None
+
+    async def test_update_form_passes_render_layout(self) -> None:
+        """update com render_layout=single_page chega ao servico normalizado."""
+        with patch(
+            "src.tools.consolidated_forms.form_service.update_form",
+            new=AsyncMock(return_value={"id": 1, "name": "X"}),
+        ) as update:
+            await manage_forms(action="update", form_id=1, render_layout="pagina unica")
+        assert update.await_args.kwargs["render_layout"] == "single_page"
+
+    async def test_create_form_passes_render_layout(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.form_service.create_form",
+            new=AsyncMock(return_value={"id": 1, "name": "X"}),
+        ) as create:
+            await manage_forms(action="create", name="X", render_layout="single_page")
+        assert create.await_args.kwargs["render_layout"] == "single_page"
+
+    async def test_update_form_refuses_unknown_render_layout(self) -> None:
+        with patch(
+            "src.tools.consolidated_forms.form_service.update_form",
+            new=AsyncMock(return_value={"id": 1, "name": "X"}),
+        ):
+            with pytest.raises(ValidationError):
+                await manage_forms(action="update", form_id=1, render_layout="carrossel")
 
     async def test_create_question_requires_type(self) -> None:
         result = await manage_forms(action="create_question", section_id=1, name="X")
